@@ -8,163 +8,275 @@
   <script src="/app.js" defer></script>
 </head>
 <body>
+  <a class="skip-link" href="#controls">Saltar a los controles de evaluación</a>
+
   <header class="masthead">
     <div class="frame topbar">
-      <div class="brand-group">
-        <span class="brand">
-          <span class="brand-mark" aria-hidden="true">∞</span>
-          <span>NextGen DevSecOps Assessment <small>Evaluación Continua · Caso REN-001</small></span>
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <circle cx="7" cy="12" r="3.5"></circle>
+            <circle cx="17" cy="12" r="3.5"></circle>
+            <path d="M10.5 12h3M7 8.5V5h10v3.5M7 15.5V19h10v-3.5"></path>
+          </svg>
         </span>
+        <div class="brand-copy">
+          <span class="brand-name">NextGen DevSecOps Assessment</span>
+          <span class="brand-sub">Certificación determinista y gobernanza continua · REN-001.v2</span>
+        </div>
       </div>
+
       <nav class="ecosystem-nav" aria-label="Sistemas conectados del ecosistema">
         <a id="nav-boards" class="eco-pill" href="https://dev.azure.com/jcastros0696/AppContratos/_workitems/edit/1" target="_blank" rel="noopener">
-          <span aria-hidden="true">📋</span> Azure Boards · AB#1
+          <svg viewBox="0 0 18 18" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <rect x="3" y="2.5" width="12" height="13" rx="2"></rect>
+            <path d="M6.5 6.5h5M6.5 9.5h5M6.5 12.5h3"></path>
+          </svg>
+          <span>Azure Boards · AB#1</span>
+          <span class="sr-only"> (se abre en una nueva pestaña)</span>
         </a>
         <a id="nav-pr" class="eco-pill" href="https://github.com/full-stack-dev-johncastrosanabria/nextgen-devsecops-assessment/pull/1" target="_blank" rel="noopener">
-          <span aria-hidden="true">🔀</span> GitHub · PR #1
+          <svg viewBox="0 0 18 18" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <circle cx="5" cy="4.5" r="2"></circle>
+            <circle cx="5" cy="13.5" r="2"></circle>
+            <circle cx="13" cy="13.5" r="2"></circle>
+            <path d="M5 6.5v5M13 11.5V7.5a2 2 0 0 0-2-2H8.5"></path>
+          </svg>
+          <span>GitHub · PR #1</span>
+          <span class="sr-only"> (se abre en una nueva pestaña)</span>
         </a>
         <a id="nav-sec" class="eco-pill" href="https://github.com/full-stack-dev-johncastrosanabria/nextgen-devsecops-assessment/security" target="_blank" rel="noopener">
-          <span aria-hidden="true">🛡️</span> CodeQL + Dependabot
+          <svg viewBox="0 0 18 18" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M9 2.25 3.5 4.5v4.25c0 3.4 2.35 6.35 5.5 7 3.15-.65 5.5-3.6 5.5-7V4.5L9 2.25Z"></path>
+            <path d="m6.75 9 1.6 1.6 3-3.2"></path>
+          </svg>
+          <span>CodeQL y Dependabot</span>
+          <span class="sr-only"> (se abre en una nueva pestaña)</span>
         </a>
-        <span class="eco-status" id="sandbox-pill">
-          <span class="pulse" aria-hidden="true"></span>
-          <span id="sandbox-text">App local: verificando…</span>
-        </span>
       </nav>
+    </div>
+
+    <div class="sandbox-strip">
+      <div class="frame sandbox-bar">
+        <div class="sandbox-state-group">
+          <span class="sandbox-indicator" id="sandbox-pill" data-active="false" role="status" aria-live="polite">
+            <span class="sandbox-dot" aria-hidden="true"></span>
+            <span id="sandbox-text">Sandbox local :5080 verificando…</span>
+          </span>
+          <a id="sandbox-open-link" class="sandbox-direct-link" href="http://127.0.0.1:5080" target="_blank" rel="noopener" hidden>
+            <span>Abrir portal activo (:5080)</span>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <path d="M6 3.5H3.5v9h9V10M9.5 3.5h3v3M12.5 3.5 7.5 8.5"></path>
+            </svg>
+            <span class="sr-only"> (se abre en una nueva pestaña)</span>
+          </a>
+        </div>
+
+        <div class="sandbox-actions" role="group" aria-label="Puente interoperable con sujeto de prueba en puerto 5080">
+          <span class="sandbox-label">Probar sujeto en vivo (:5080):</span>
+          <button type="button" class="sandbox-btn" data-launch="v1">Iniciar v1</button>
+          <button type="button" class="sandbox-btn" data-launch="v2">Iniciar v2</button>
+          <button type="button" class="sandbox-btn" data-launch="v3">Iniciar v3</button>
+          <button type="button" class="sandbox-btn sandbox-stop" id="stop-sandbox" hidden>Detener :5080</button>
+        </div>
+      </div>
+      <div class="frame" id="sandbox-alert-wrap" hidden>
+        <div class="inline-alert" id="sandbox-alert" role="alert">
+          <span id="sandbox-alert-msg"></span>
+          <button type="button" class="btn-inline-action" id="sandbox-retry-btn">Reintentar</button>
+        </div>
+      </div>
     </div>
   </header>
 
-  <main class="frame">
-    <section class="hero" aria-labelledby="title">
-      <div class="hero-copy">
-        <div class="hero-chips">
-          <span class="criterion">CRITERIO REN-001</span>
-          <span class="policy-chip">Política determinista REN-001.v2</span>
-          <span class="foundry-chip">Azure AI Foundry · MAF Fan-Out / Fan-In</span>
+  <main class="frame workspace">
+    <section class="command-deck" aria-labelledby="title">
+      <div class="deck-header">
+        <div class="deck-heading-block">
+          <h1 id="title">Evaluador de renovaciones</h1>
+          <p class="deck-rule">
+            <strong>Regla auditada (<code>REN-001</code>):</strong> al evaluar renovaciones, un contrato cancelado nunca debe generar un aviso. Los agentes QA y SecOps investigan las 8 etapas en paralelo; la política determinista <code>REN-001.v2</code> valida cada evidencia contra código y TRX antes de emitir el dictamen.
+          </p>
         </div>
-        <h1 id="title">Evaluador de renovaciones</h1>
-        <p class="hero-lead">
-          <strong>Regla auditada:</strong> Al evaluar renovaciones, un contrato cancelado nunca debe generar un aviso.
-          Dos agentes especializados investigan en paralelo las 8 etapas del ciclo de vida mientras una política determinista certifica la evidencia y gobierna las acciones en Azure Boards.
-        </p>
+        <div class="deck-utility">
+          <button type="button" class="btn-secondary" id="help-toggle-btn" aria-expanded="false" aria-controls="help-drawer">
+            <svg viewBox="0 0 18 18" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <circle cx="9" cy="9" r="6.75"></circle>
+              <path d="M7.25 7a1.75 1.75 0 1 1 2.6 1.53c-.55.32-.85.72-.85 1.47M9 12.75h.01"></path>
+            </svg>
+            <span>Guía REN-001 y atajos</span>
+          </button>
+        </div>
       </div>
 
-      <aside class="bridge-card" aria-labelledby="bridge-title">
-        <div class="bridge-head">
-          <h2 id="bridge-title">Puente Interoperable · AppContratos</h2>
-          <span class="bridge-sub">Lanzá cualquier versión real en <code>127.0.0.1:5080</code> para probar su comportamiento en vivo e ir y volver sin fricción.</span>
+      <section id="help-drawer" class="help-drawer" hidden aria-labelledby="help-drawer-title" tabindex="-1">
+        <div class="help-drawer-head">
+          <h2 id="help-drawer-title">Referencia operativa de política, alcances y teclado</h2>
+          <button type="button" class="btn-ghost" id="help-close-btn">Cerrar guía (Esc)</button>
         </div>
-        <div class="bridge-actions">
-          <button type="button" class="btn-ghost" data-launch="v1">Abrir App v1 ↗</button>
-          <button type="button" class="btn-ghost" data-launch="v2">Abrir App v2 ↗</button>
-          <button type="button" class="btn-ghost" data-launch="v3">Abrir App v3 ↗</button>
-          <button type="button" class="btn-subtle" id="stop-sandbox" hidden>Detener :5080</button>
+        <div class="help-grid">
+          <div class="help-col">
+            <h3>Certificación REN-001.v2</h3>
+            <p>Exige una prueba C# marcada con <code>[Trait("Criterio", "REN-001")]</code> que prepare un contrato cancelado, invoque la evaluación, verifique <code>Assert.Empty</code> y registre <code>Passed</code> en el XML del TRX firmado con SHA-256.</p>
+          </div>
+          <div class="help-col">
+            <h3>Alcances de hallazgos SecOps</h3>
+            <p><strong>versión:</strong> código fuente y alertas SAST en GitHub CodeQL. <strong>recurso:</strong> configuración e identidad del Azure Container App. <strong>ambiente:</strong> postura Defender CSPM y telemetría KQL en Application Insights.</p>
+          </div>
+          <div class="help-col">
+            <h3>Gobernanza WIQL idempotente</h3>
+            <p>Las entregas en <code>Incumplido</code> o <code>Evidencia insuficiente</code> generan un punto de control con huella <code>devsecops-fp-…</code>. Al aprobar, WIQL actualiza la tarea abierta en <code>AB#1</code> sin crear duplicados.</p>
+          </div>
+          <div class="help-col">
+            <h3>Atajos rápidos y contingencia</h3>
+            <p><kbd>R</kbd> ejecuta la evaluación · <kbd>D</kbd> filtra solo brechas · <kbd>1</kbd>–<kbd>8</kbd> inspecciona cada etapa · <kbd>?</kbd> abre esta guía · <kbd>Esc</kbd> cancela o cierra. Sin conexión cloud, elige <strong>Solo evidencia determinista</strong> (0 tokens).</p>
+          </div>
         </div>
-      </aside>
+      </section>
+
+      <form class="controls" id="controls">
+        <div class="fields">
+          <div class="field-group">
+            <label for="scope-select">Alcance de entregas</label>
+            <select id="scope-select" name="version">
+              <option value="todas">Comparar las tres entregas (v1 · v2 · v3)</option>
+              <option value="v1">Solo Versión 1 · Cumple código y prueba REN-001</option>
+              <option value="v2">Solo Versión 2 · Regresión funcional en cancelados</option>
+              <option value="v3">Solo Versión 3 · Suite en verde sin evidencia REN-001</option>
+            </select>
+          </div>
+
+          <div class="field-group">
+            <label for="mode-select">Motor de análisis</label>
+            <select id="mode-select" name="modo" aria-describedby="mode-help">
+              <option value="agente">Con agentes MAF en paralelo (QA + SecOps)</option>
+              <option value="solo-evidencia">Solo evidencia determinista (0 tokens)</option>
+            </select>
+          </div>
+
+          <div class="control-cta">
+            <button type="submit" class="btn-primary" id="run-btn">
+              <svg viewBox="0 0 18 18" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                <polygon points="5 3.5 14.5 9 5 14.5 5 3.5"></polygon>
+              </svg>
+              <span>Ejecutar evaluación</span>
+            </button>
+            <button type="button" class="btn-danger" id="cancel-btn" hidden>Detener evaluación</button>
+            <button type="button" class="btn-secondary" id="filter-diff-btn" aria-pressed="false" title="Mostrar únicamente etapas con fallos o atención (Atajo: D)">
+              Solo brechas
+            </button>
+            <button type="button" class="btn-secondary" id="load-latest" hidden>Restaurar caché</button>
+          </div>
+        </div>
+        <p id="mode-help" class="mode-caption">Ejecuta en paralelo los agentes de QA y Seguridad/Operación sobre Azure AI Foundry; el dictamen lo decide siempre la política determinista.</p>
+      </form>
     </section>
 
-    <section class="cycle-panel" aria-labelledby="cycle-heading">
-      <div class="section-head">
+    <section class="transit-corridor" aria-labelledby="cycle-heading">
+      <div class="corridor-header">
         <div>
-          <h2 id="cycle-heading">Mapa Interactivo de las 8 Etapas DevSecOps</h2>
-          <p class="section-sub">Seleccioná cualquier etapa para abrir el inspector descriptivo con la pregunta de gobierno, la evidencia observada y accesos directos a cada herramienta.</p>
+          <h2 id="cycle-heading">Corredor de trazabilidad de las 8 etapas DevSecOps</h2>
+          <p class="section-sub">Selecciona cualquier estación (o pulsa <kbd>1</kbd>–<kbd>8</kbd>) para inspeccionar la pregunta de gobierno, las métricas recolectadas y la comparación entre <code>v1</code>, <code>v2</code> y <code>v3</code>.</p>
+        </div>
+        <div class="corridor-legend" aria-label="Leyenda de estados de estación">
+          <span class="legend-item"><span class="legend-dot" data-state="verificado" aria-hidden="true"></span>Verificado</span>
+          <span class="legend-item"><span class="legend-dot" data-state="atencion" aria-hidden="true"></span>Atención</span>
+          <span class="legend-item"><span class="legend-dot" data-state="incumplido" aria-hidden="true"></span>Incumplido</span>
         </div>
       </div>
 
-      <div class="infinity-grid">
-        <div class="loop-column" aria-label="Bucle DevSec: Planificación a Pruebas">
-          <span class="loop-label">Ciclo DevSec · Código y Evidencia</span>
-          <div class="loop-stages" id="loop-devsec"></div>
+      <div class="corridor-map">
+        <div class="corridor-wing">
+          <h3 class="wing-heading">Línea DevSec · Código y evidencia</h3>
+          <ol class="station-list" id="loop-devsec"></ol>
         </div>
 
-        <div class="core-hub" aria-label="Núcleo de IA, Seguridad y Gobernanza">
-          <div class="hub-badge">
-            <span class="hub-icon" aria-hidden="true">🧠 · 🔒 · 🏛️</span>
-            <strong>IA + Seguridad + Gobernanza</strong>
-            <span>Agente QA ∥ Agente SecOps → Evaluador determinista → HITL Boards</span>
+        <div class="corridor-hub">
+          <div class="hub-node">
+            <svg viewBox="0 0 28 28" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <path d="M4 9h6l4 5 4-5h6M4 19h6l4-5 4 5h6"></path>
+              <circle cx="14" cy="14" r="3"></circle>
+            </svg>
+            <strong>Núcleo determinista</strong>
+            <span>Agente QA ∥ SecOps → REN-001.v2 → HITL</span>
           </div>
         </div>
 
-        <div class="loop-column" aria-label="Bucle CloudOps: Despliegue a Optimización">
-          <span class="loop-label">Ciclo CloudOps · Nube y Mejora Continua</span>
-          <div class="loop-stages" id="loop-cloudops"></div>
+        <div class="corridor-wing">
+          <h3 class="wing-heading">Línea CloudOps · Nube y gobierno</h3>
+          <ol class="station-list" id="loop-cloudops"></ol>
         </div>
       </div>
-    </section>
 
-    <form class="controls" id="controls">
-      <div class="fields">
-        <label>Alcance de evaluación
-          <select name="version">
-            <option value="todas">Comparar las tres versiones (v1 · v2 · v3)</option>
-            <option value="v1">Versión 1 · Cumple código y prueba vinculada</option>
-            <option value="v2">Versión 2 · Regresión funcional en cancelados</option>
-            <option value="v3">Versión 3 · Pipeline en verde sin evidencia REN-001</option>
-          </select>
-        </label>
-        <label>Motor de análisis
-          <select name="modo" aria-describedby="mode-help">
-            <option value="agente">Con agentes MAF en paralelo (QA + SecOps)</option>
-            <option value="solo-evidencia">Solo evidencia determinista (0 tokens)</option>
-          </select>
-        </label>
-        <div class="control-cta">
-          <button type="submit" class="btn-primary">Ejecutar evaluación <span aria-hidden="true">→</span></button>
-          <button type="button" class="btn-secondary" id="load-latest" hidden>Restaurar última corrida</button>
+      <section id="stage-inspector" class="stage-inspector" hidden aria-labelledby="stage-inspector-title" tabindex="-1">
+        <div class="inspector-topbar">
+          <div class="inspector-heading-group">
+            <h3 id="stage-inspector-title">Detalle de etapa</h3>
+            <span class="inspector-meta" id="stage-inspector-meta"></span>
+          </div>
+          <div class="inspector-controls">
+            <div class="inspector-version-tabs" id="inspector-version-tabs" role="group" aria-label="Versión inspeccionada en esta etapa"></div>
+            <button type="button" class="btn-ghost" id="inspector-prev-btn" aria-label="Etapa anterior">← Anterior</button>
+            <button type="button" class="btn-ghost" id="inspector-next-btn" aria-label="Etapa siguiente">Siguiente →</button>
+            <button type="button" class="btn-ghost" id="inspector-close-btn">Cerrar (Esc)</button>
+          </div>
         </div>
-      </div>
-      <p id="mode-help">Ejecuta en paralelo los agentes de QA y Seguridad/Operación sobre Azure AI Foundry; el veredicto siempre es determinista.</p>
-    </form>
+        <div class="inspector-body" id="stage-inspector-body"></div>
+      </section>
+    </section>
 
     <section class="results" aria-labelledby="results-title">
       <div class="results-head">
         <div>
-          <h2 id="results-title">Matriz Comparativa de Entregas</h2>
-          <p class="section-sub">Contrastá cómo responde el evaluador ante una entrega conforme (v1), un fallo funcional (v2) y una brecha silenciosa de cobertura (v3).</p>
+          <h2 id="results-title">Matriz comparativa de entregas</h2>
+          <p class="section-sub">Contrasta en paralelo una entrega conforme (<code>v1</code>), una regresión funcional (<code>v2</code>) y una brecha silenciosa de cobertura (<code>v3</code>).</p>
         </div>
-        <p id="status" class="status-pill" role="status">Listo para ejecutar</p>
+        <div class="status-banner" id="status-banner" data-tone="idle">
+          <span class="status-dot" aria-hidden="true"></span>
+          <p id="status" role="status" aria-live="polite">Listo para ejecutar evaluación</p>
+        </div>
       </div>
-      <div class="cards" id="results" aria-busy="false"></div>
+
+      <div class="cards" id="results" data-visible-count="3" aria-busy="false"></div>
     </section>
   </main>
 
   <footer class="site-footer frame">
-    <p>Modernización del ciclo de vida DevSecOps con Microsoft Agent Framework, Azure AI Foundry, seguridad y gobernanza continua.</p>
+    <p>NextGen DevSecOps Assessment · Evaluación continua con Microsoft Agent Framework, Azure AI Foundry, seguridad en origen y gobernanza humana auditable.</p>
+    <p class="footer-shortcuts">Atajos: <kbd>R</kbd> Evaluar · <kbd>D</kbd> Solo brechas · <kbd>1</kbd>–<kbd>8</kbd> Etapas · <kbd>?</kbd> Guía</p>
   </footer>
 
   <template id="version-card">
     <article class="card">
-      <div class="card-top">
-        <div class="card-head">
+      <div class="card-band card-head-band">
+        <div class="card-title-row">
           <div>
-            <h3></h3>
+            <h3 class="card-version-title"></h3>
             <p class="version-role"></p>
           </div>
-          <span class="badge" data-state="idle">• Sin ejecutar</span>
+          <span class="badge" data-state="idle">Sin ejecutar</span>
         </div>
-        <p class="reason">Ejecutá la evaluación o restaurá la última corrida para inspeccionar el dictamen y las 8 etapas de esta entrega.</p>
-        <div class="card-interop"></div>
+        <div class="card-provenance-row">
+          <span class="provenance-chip" data-live="false">Pendiente de corrida</span>
+          <div class="card-quick-actions"></div>
+        </div>
       </div>
-      <div class="stages"></div>
-      <div class="evidence"></div>
-      <div class="governance"></div>
-      <div class="downloads"></div>
+
+      <div class="card-band card-verdict-band">
+        <p class="reason">Selecciona «Ejecutar evaluación» para compilar de forma aislada, correr xUnit y auditar las 8 etapas de esta entrega.</p>
+        <p class="next-step" hidden></p>
+        <div class="card-alert" hidden role="alert"></div>
+      </div>
+
+      <div class="card-band card-proof-band"></div>
+      <div class="card-band stages"></div>
+      <div class="card-band evidence"></div>
+
+      <div class="card-band card-footer-band">
+        <div class="governance"></div>
+        <div class="downloads"></div>
+      </div>
     </article>
   </template>
-
-  <dialog id="stage-dialog" closedby="any" aria-labelledby="stage-dialog-title">
-    <div class="modal-shell">
-      <div class="modal-header">
-        <div>
-          <span class="modal-kicker" id="stage-dialog-kicker">Etapa DevSecOps</span>
-          <h1 id="stage-dialog-title">Detalle de etapa</h1>
-        </div>
-        <form method="dialog">
-          <button type="submit" class="modal-close" aria-label="Cerrar inspector de etapa">✕ Cerrar</button>
-        </form>
-      </div>
-      <div class="modal-body" id="stage-dialog-body"></div>
-    </div>
-  </dialog>
 </body>
 </html>

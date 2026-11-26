@@ -117,6 +117,10 @@ def _format_summary(report: dict) -> dict:
         key: report["ejecucion"].get(key)
         for key in ("id", "version", "trx", "log", "commit")
     }
+    if "sha256_archivos" in report["ejecucion"]:
+        summary["ejecucion"]["archivos_firmados"] = len(report["ejecucion"]["sha256_archivos"] or {})
+    if "cambios_locales" in report["ejecucion"]:
+        summary["ejecucion"]["cambios_locales"] = report["ejecucion"]["cambios_locales"]
     return summary
 
 
@@ -132,7 +136,9 @@ def latest_reports(output_dir: Path) -> dict[str, dict]:
             if ver in ("v1", "v2", "v3"):
                 prev = latest_by_version.get(ver)
                 if prev is None or mtime > prev[0]:
-                    latest_by_version[ver] = (mtime, _format_summary(data))
+                    formatted = _format_summary(data)
+                    formatted["registrado_ms"] = int(mtime * 1000)
+                    latest_by_version[ver] = (mtime, formatted)
         except Exception:
             continue
     return {ver: item[1] for ver, item in latest_by_version.items()}
