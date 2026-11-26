@@ -27,6 +27,10 @@
   --action-primary-hover: #0f3573;
   --action-primary-active: #0a2552;
   --action-accent-on-navy: #7dd3fc;
+  --brand-tile-bg: #182f5c;
+  --brand-edge: #7c9df0;
+  --brand-cyan: #29c5f6;
+  --brand-cyan-halo: rgba(41, 197, 246, 0.28);
   --action-danger: #b91c1c;
   --action-danger-hover: #991b1b;
 
@@ -238,14 +242,19 @@ kbd {
 .brand-mark {
   display: grid;
   place-items: center;
-  inline-size: 38px;
-  block-size: 38px;
+  inline-size: 40px;
+  block-size: 40px;
   border-radius: var(--radius-sm);
-  background-color: var(--surface-navy-raised);
+  background-color: var(--brand-tile-bg);
   border: 1px solid var(--border-on-navy);
-  color: var(--action-accent-on-navy);
   flex-shrink: 0;
 }
+
+.brand-mark-edge { stroke: var(--brand-edge); }
+.brand-mark-spur { stroke: var(--brand-cyan); }
+.brand-mark-node { fill: var(--ink-on-navy); }
+.brand-mark-halo { fill: var(--brand-cyan-halo); }
+.brand-mark-pulse { fill: var(--brand-cyan); }
 
 .brand-copy {
   display: grid;

@@ -25,8 +25,13 @@ SANDBOX_PORT = 5080
 _SANDBOX_PROC: subprocess.Popen | None = None
 _SANDBOX_VERSION: str | None = None
 
-ASSETS = {"/": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"),
-          "/style.css": ("style.css", "text/css")}
+ASSETS = {
+    "/": ("index.html", "text/html"),
+    "/app.js": ("app.js", "text/javascript"),
+    "/style.css": ("style.css", "text/css"),
+    "/favicon.svg": ("favicon.svg", "image/svg+xml"),
+    "/brand-mark.png": ("brand-mark.png", "image/png"),
+}
 REPORTS = {
     "informe.md": "text/plain",
     "informe.json": "application/json",

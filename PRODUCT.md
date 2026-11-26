@@ -38,6 +38,7 @@ Dos agentes especializados sobre **Microsoft Agent Framework (MAF)** y **Azure A
 ## Brand Commitments
 
 - **Nombre del producto:** `NextGen DevSecOps Assessment`.
+- **Símbolo de marca oficial:** monograma vectorial **«N» de nodos conectados** sobre fondo azul marino (tres vértices blancos unidos por aristas azul aciano y nodo superior derecho activo en cian con nodo satélite diagonal), incorporado en la cabecera y el favicon (`assessment/static/favicon.svg` y `assessment/static/brand-mark.png`).
 - **Identidad cromática vinculante:** azul institucional únicamente en tema claro (superficies en blanco y azul hielo con cabecera y rieles estructurales en azul marino profundo). No se implementa modo oscuro.
 
 ## Evidence on Hand
