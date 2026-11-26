@@ -33,11 +33,13 @@ class DemoHTTP(unittest.TestCase):
             directory.mkdir()
             (directory / "informe.json").write_text('{"veredicto":"INCUMPLIDO"}', encoding="utf-8")
             (directory / "dotnet-test.log").write_text("Ejecución de dotnet test\n", encoding="utf-8")
+            (directory / "checkpoint_aprobacion.json").write_text('{"ejecucion_id":"' + run_id + '"}', encoding="utf-8")
             report = {
                 "veredicto": "INCUMPLIDO", "justificacion": "Se generó un aviso.",
-                "siguiente_paso": None, "referencias": [], "resultados_trx": [{"outcome": "Failed"}],
+                "siguiente_paso": "Corregir filtro.", "referencias": [], "resultados_trx": [{"outcome": "Failed"}],
                 "investigacion": {"estado": "SOLO_EVIDENCIA"}, "diagnosticos": [],
                 "ejecucion": {"id": run_id, "trx": "resultados.trx", "log": "dotnet-test.log"},
+                "accion_propuesta": {"estado": "PENDIENTE_APROBACION", "tag_idempotencia": "devsecops-fp-demo"},
             }
             origin = f"http://127.0.0.1:{server.server_port}"
             try:
@@ -53,8 +55,25 @@ class DemoHTTP(unittest.TestCase):
                     self.assertEqual(parsed["ejecucion"]["log"], "dotnet-test.log")
                     self.assertEqual(request("GET", f"/informes/{run_id}/informe.json")[0], 200)
                     self.assertEqual(request("GET", f"/informes/{run_id}/dotnet-test.log")[0], 200)
+                    self.assertEqual(request("GET", f"/informes/{run_id}/checkpoint_aprobacion.json")[0], 200)
                     self.assertEqual(request("GET", "/.env")[0], 404)
                     assess.assert_awaited_once()
+
+                with (patch("assessment.ui.OUTPUT", root),
+                      patch("assessment.ui.apply_decision", return_value={
+                          "accion_propuesta": {
+                              "estado": "APROBADA",
+                              "boards_resultado": {"operacion": "creada", "referencia": "AB#9", "url": "https://dev.azure.com/demo"},
+                          },
+                          "etapas_devsecops": [{"numero": 8, "estado": "verificado"}],
+                      }) as decide):
+                    self.assertEqual(request("POST", "/api/acciones", "{}")[0], 403)
+                    self.assertEqual(request("POST", "/api/acciones", '{"ejecucion":"invalido","decision":"aprobar"}', origin)[0], 400)
+                    st, resp = request("POST", "/api/acciones", json.dumps({"ejecucion": run_id, "decision": "aprobar", "nota": "OK"}), origin)
+                    self.assertEqual(st, 200)
+                    self.assertEqual(json.loads(resp)["accion_propuesta"]["boards_resultado"]["referencia"], "AB#9")
+                    decide.assert_called_once()
+
                 with (patch("assessment.ui.OUTPUT", root),
                       patch("assessment.ui.assess_project", side_effect=ValueError("fallo inesperado"))):
                     self.assertEqual(request("POST", "/api/evaluar", '{"version":"v1","modo":"solo-evidencia"}', origin)[0], 500)

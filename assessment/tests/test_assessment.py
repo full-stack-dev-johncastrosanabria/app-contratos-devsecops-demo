@@ -15,7 +15,14 @@ from openai import AsyncAzureOpenAI
 
 from assessment.evidence import APP, PROJECT, collect
 from assessment.policy import evaluate, source_tests
-from assessment.workflow import AZURE_KEYS, AnthropicClient, OpenAIChatCompletionClient, Request, run
+from assessment.workflow import (
+    AZURE_KEYS,
+    AnthropicClient,
+    OpenAIChatCompletionClient,
+    Request,
+    resolve_human_decision,
+    run,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -207,6 +214,47 @@ class DotnetIntegration(unittest.TestCase):
         self.assertEqual(requests[1]["messages"][-1]["content"][0]["type"], "tool_result")
         self.assertTrue(qa["referencias"][0]["correlacion_valida"])
         self.assertEqual(report["veredicto"], "INCUMPLIDO")
+
+    def test_devsecops_parallel_branches_and_human_approval_checkpoint(self):
+        fake_cloud = {
+            "habilitado": True,
+            "politica_version": "REN-001.v2",
+            "boards": {"disponible": True, "id": 1, "referencia": "AB#1", "titulo": "Excluir cancelados", "url": "https://dev.azure.com/org/proj/_workitems/edit/1"},
+            "github": {
+                "disponible": True, "repositorio": "org/repo", "url_repositorio": "https://github.com/org/repo",
+                "pull_request": {"numero": 1, "estado": "merged", "referencias_boards": ["AB#1"], "url": "https://github.com/org/repo/pull/1"},
+                "pipeline_ci": {"run_id": 10, "url": "https://github.com/org/repo/actions/runs/10"},
+                "seguridad_origen": {"dependabot_configurado": True, "code_scanning": {"estado": "activo", "alertas_abiertas": 0, "hallazgos": []}},
+            },
+            "azure": {
+                "disponible": True,
+                "despliegue": {"recurso": "ca-appcontratos", "estado": "Succeeded", "revision_activa": "ca--rev1", "version_app": "v2", "url": "https://ca.azurecontainerapps.io", "https_exclusivo": True, "identidad_administrada": "None"},
+                "defender": {"https_exclusivo_verificado": True, "hallazgos": [{"codigo": "AZ-POSTURE-MI-001", "alcance": "recurso", "severidad": "Baja", "detalle": "Sin Managed Identity"}]},
+                "telemetria": {"disponible": True, "total_solicitudes": 12, "fallos_5xx": 0, "tasa_error_pct": 0.0, "latencia_promedio_ms": 18.4},
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            local_ev = replace(self.failed, directory=out_dir / "demo_run", identity={**self.failed.identity, "id": "demo_run"})
+            local_ev.directory.mkdir(parents=True)
+            with (patch("assessment.workflow.collect", return_value=local_ev),
+                  patch("assessment.workflow.collect_devsecops_context", return_value=fake_cloud)):
+                report = asyncio.run(run(Request(local_ev.root, out_dir, agent=False, devsecops=True)))
+            (local_ev.directory / "informe.json").write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+
+            self.assertEqual(len(report["etapas_devsecops"]), 8)
+            self.assertEqual(report["investigacion_secops"]["estado"], "SOLO_EVIDENCIA")
+            self.assertEqual(report["investigacion_secops"]["hallazgos"][0]["alcance"], "recurso")
+            self.assertEqual(report["accion_propuesta"]["estado"], "PENDIENTE_APROBACION")
+            self.assertTrue((local_ev.directory / "checkpoint_aprobacion.json").is_file())
+
+            with patch("assessment.workflow.upsert_boards_task", return_value={
+                "operacion": "creada", "work_item_id": 7, "referencia": "AB#7",
+                "fingerprint": report["accion_propuesta"]["fingerprint"], "url": "https://dev.azure.com/org/proj/_workitems/edit/7",
+            }):
+                approved = resolve_human_decision(local_ev.directory, approve=True, note="Aprobado en comité")
+            self.assertEqual(approved["accion_propuesta"]["estado"], "APROBADA")
+            self.assertEqual(approved["accion_propuesta"]["boards_resultado"]["referencia"], "AB#7")
 
 
 if __name__ == "__main__":

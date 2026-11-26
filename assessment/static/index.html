@@ -3,24 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Evaluador de renovaciones · AppContratos</title>
+  <title>Evaluador de renovaciones · NextGen DevSecOps Assessment</title>
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
   <header class="masthead">
     <div class="frame topbar">
-      <span class="brand"><span class="brand-mark" aria-hidden="true">✓</span> AppContratos</span>
-      <span class="local"><span aria-hidden="true"></span> Demo local</span>
+      <span class="brand"><span class="brand-mark" aria-hidden="true">✓</span> AppContratos · NextGen DevSecOps</span>
+      <span class="local"><span aria-hidden="true"></span> Azure AI Foundry + MAF</span>
     </div>
   </header>
   <main class="frame">
     <section class="intro" aria-labelledby="title">
-      <span class="criterion">REN-001</span>
+      <span class="criterion">REN-001 · 8 Etapas DevSecOps</span>
       <h1 id="title">Evaluador de renovaciones</h1>
       <p>Al evaluar renovaciones, un contrato cancelado no debe generar un aviso.</p>
       <ol class="flow" aria-label="Pasos de la evaluación">
-        <li>Ejecutar xUnit</li><li>Revisar código y TRX</li><li>Emitir veredicto</li>
+        <li>Resolver contexto (Boards · GitHub · Azure)</li>
+        <li>Agentes paralelos (QA + SecOps)</li>
+        <li>Política determinista</li>
+        <li>Aprobación humana en Boards</li>
       </ol>
     </section>
 
@@ -29,20 +32,20 @@
         <label>Versión
           <select name="version">
             <option value="todas">Las tres versiones</option>
-            <option value="v1">Versión 1</option>
-            <option value="v2">Versión 2</option>
-            <option value="v3">Versión 3</option>
+            <option value="v1">Versión 1 (Cumple + Evidencia)</option>
+            <option value="v2">Versión 2 (Defecto funcional)</option>
+            <option value="v3">Versión 3 (Sin prueba vinculada)</option>
           </select>
         </label>
         <label>Modo
           <select name="modo" aria-describedby="mode-help">
-            <option value="solo-evidencia">Solo evidencia</option>
-            <option value="agente">Con agente de QA</option>
+            <option value="agente">Con agentes MAF (QA + SecOps)</option>
+            <option value="solo-evidencia">Solo evidencia determinista</option>
           </select>
         </label>
         <button type="submit">Ejecutar evaluación <span aria-hidden="true">→</span></button>
       </div>
-      <p id="mode-help">Revisa la evidencia local sin llamar al modelo.</p>
+      <p id="mode-help">Ejecuta en paralelo los agentes de QA y Seguridad/Operación sobre Azure AI Foundry; el veredicto es determinista.</p>
     </form>
 
     <section class="results" aria-labelledby="results-title">
@@ -58,7 +61,9 @@
     <article class="card">
       <div class="card-head"><h3></h3><span class="badge" data-state="idle">Sin ejecutar</span></div>
       <p class="reason">El veredicto aparecerá después de ejecutar esta versión.</p>
+      <div class="stages"></div>
       <div class="evidence"></div>
+      <div class="governance"></div>
       <div class="downloads"></div>
     </article>
   </template>

@@ -1,10 +1,11 @@
-"""CLI local para la demo REN-001."""
+"""CLI local y DevSecOps para la demo REN-001."""
 import argparse
 import asyncio
 import json
 from pathlib import Path
 
-from .workflow import Request, run
+from .integrations import load_settings
+from .workflow import Request, resolve_human_decision, run
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -17,6 +18,7 @@ def markdown(report: dict) -> str:
         f"# {criterion['id']} · {identity['version']}", "",
         criterion["texto"] + ".", "",
         f"**{report['veredicto']}**", "", report["justificacion"], "",
+        f"- Política `{report.get('politica_version', 'REN-001.v1')}`",
         f"- Modo `{report['modo']}`",
         f"- Ejecución `{identity['id']}`",
         f"- Proyecto `{identity['proyecto']}`",
@@ -42,6 +44,14 @@ def markdown(report: dict) -> str:
                      for row in results.values())
         lines.extend(f"- Fuente inspeccionada `{path}`" for path in
                      sorted({ref["archivo"] for ref in report["pruebas_fuente"]}))
+
+    stages = report.get("etapas_devsecops") or []
+    if stages:
+        lines += ["", "## Recorrido DevSecOps (8 Etapas)", "", "| Etapa | Fuente | Estado | Evidencia |", "| --- | --- | --- | --- |"]
+        for s in stages:
+            ev = f"[{s['resumen']}]({s['url']})" if s.get("url") else s["resumen"]
+            lines.append(f"| {s['numero']}. {s['etapa']} | {s['herramienta']} | `{s['estado']}` | {ev} |")
+
     if report["diagnosticos"]:
         lines += ["", "## Diagnóstico", ""]
         lines.extend(f"- `{d['codigo']}` · {d['detalle']}" for d in report["diagnosticos"])
@@ -52,46 +62,102 @@ def markdown(report: dict) -> str:
             status = "válida" if ref["correlacion_valida"] else "sin correlación confirmada"
             lines.append(f"- Referencia `{ref['prueba']}` · {status} · {', '.join(ref['ejecuciones'])}")
         lines.extend(f"- `{call['herramienta']}`" for call in qa["llamadas"])
+
+    secops = report.get("investigacion_secops") or {}
+    if secops.get("estado") not in (None, "NO_SOLICITADA"):
+        lines += ["", "## Seguridad y Operación", "", f"Estado `{secops['estado']}`.", ""]
+        for key in ("detalle", "resumen"):
+            if secops.get(key):
+                lines.append(secops[key])
+        for item in secops.get("hallazgos") or []:
+            lines.append(f"- **[{item['alcance']} · {item['severidad']}]** {item['titulo']}: {item['evidencia']}")
+        lines.extend(f"- `{call['herramienta']}`" for call in secops.get("llamadas") or [])
+
+    action = report.get("accion_propuesta")
+    if action:
+        lines += ["", "## Acción de Gobernanza (Azure Boards)", ""]
+        lines.append(f"- Estado: `{action['estado']}` · Clave `{action['tag_idempotencia']}`")
+        lines.append(f"- Propuesta: **{action['titulo']}**")
+        if action.get("boards_resultado"):
+            br = action["boards_resultado"]
+            lines.append(f"- Work Item ({br['operacion']}): [{br['referencia']}]({br['url']})")
+        elif action.get("nota_humana"):
+            lines.append(f"- Nota: {action['nota_humana']}")
+
     if report["siguiente_paso"]:
         lines += ["", "## Siguiente paso", "", report["siguiente_paso"]]
     return "\n".join(lines) + "\n"
 
 
-async def assess_project(root: Path, output: Path, agent: bool) -> dict:
-    report = await run(Request(root, output, agent))
+def _devsecops_configured() -> bool:
+    s = load_settings()
+    if s.get("DEVSECOPS_LIVE") == "0":
+        return False
+    return any(s.get(k) for k in ("AZURE_DEVOPS_ORG_URL", "GITHUB_REPO", "AZURE_CONTAINER_APP"))
+
+
+async def assess_project(root: Path, output: Path, agent: bool, devsecops: bool | None = None) -> dict:
+    use_devsecops = _devsecops_configured() if devsecops is None else devsecops
+    report = await run(Request(root, output, agent, devsecops=use_devsecops))
     directory = output / report["ejecucion"]["id"]
     (directory / "informe.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (directory / "informe.md").write_text(markdown(report), encoding="utf-8")
     return report
 
 
-async def assess(roots: list[Path], output: Path, agent: bool) -> int:
+def apply_decision(run_directory: Path, approve: bool, note: str = "") -> dict:
+    report = resolve_human_decision(run_directory, approve=approve, note=note)
+    (run_directory / "informe.md").write_text(markdown(report), encoding="utf-8")
+    return report
+
+
+async def assess(roots: list[Path], output: Path, agent: bool, devsecops: bool | None = None) -> int:
     error = False
     for root in roots:
-        report = await assess_project(root, output, agent)
+        report = await assess_project(root, output, agent, devsecops=devsecops)
         directory = output / report["ejecucion"]["id"]
         qa = report["investigacion"]
+        secops = report.get("investigacion_secops") or {}
         print(f"{root.name} · {report['modo']} · {report['veredicto']} · {directory / 'informe.md'}")
         if qa.get("detalle"):
             print(f"  {qa['detalle']}")
         for call in qa["llamadas"]:
             print(f"  QA → {call['herramienta']}")
+        for call in secops.get("llamadas") or []:
+            print(f"  SecOps → {call['herramienta']}")
+        if report.get("accion_propuesta"):
+            act = report["accion_propuesta"]
+            print(f"  Acción ({act['estado']}) → {act['tag_idempotencia']}")
         error |= bool(report["diagnosticos"]) or qa["estado"] not in {"SOLO_EVIDENCIA", "COMPLETADA"}
     return 2 if error else 0
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Evalúa la evidencia xUnit del criterio REN-001")
-    parser.add_argument("proyecto", help="v1, v2, v3, una carpeta de proyecto o 'todas'")
+    parser = argparse.ArgumentParser(description="Evalúa el ciclo DevSecOps y evidencia xUnit del criterio REN-001")
+    parser.add_argument("proyecto", help="v1, v2, v3, una carpeta de proyecto, 'todas' o 'aprobar'/'descartar'")
     parser.add_argument("--modo", choices=("solo-evidencia", "agente"), default="solo-evidencia")
     parser.add_argument("--salida", type=Path, default=ROOT / "assessment/runs")
+    parser.add_argument("--ejecucion", help="ID de ejecución para aprobar o descartar su acción propuesta")
+    parser.add_argument("--motivo", default="", help="Nota o motivo de aprobación/descarte")
+    parser.add_argument("--sin-nube", action="store_true", help="Omitir consultas en vivo a Boards, GitHub y Azure")
     args = parser.parse_args()
+
+    if args.proyecto in ("aprobar", "descartar"):
+        if not args.ejecucion:
+            parser.error("Indicá --ejecucion <id> para aprobar o descartar una acción.")
+        updated = apply_decision(args.salida.resolve() / args.ejecucion, args.proyecto == "aprobar", args.motivo)
+        act = updated["accion_propuesta"]
+        res = act.get("boards_resultado") or {}
+        print(f"{args.ejecucion} · {act['estado']} · {res.get('referencia', act['tag_idempotencia'])} {res.get('url', '')}".strip())
+        return 0
+
     versions = ("v1", "v2", "v3")
     if args.proyecto == "todas":
         roots = [ROOT / version for version in versions]
     else:
         roots = [ROOT / args.proyecto if args.proyecto in versions else Path(args.proyecto).resolve()]
-    return asyncio.run(assess(roots, args.salida.resolve(), args.modo == "agente"))
+    devsecops = False if args.sin_nube else None
+    return asyncio.run(assess(roots, args.salida.resolve(), args.modo == "agente", devsecops=devsecops))
 
 
 if __name__ == "__main__":

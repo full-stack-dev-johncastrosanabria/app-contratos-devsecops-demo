@@ -84,6 +84,17 @@ Fragmento generado al evaluar v2 en modo solo evidencia.
 | v1 | Observado · `VERIFICADO` | Pasaron los cuatro casos. El caso cancelado tiene vínculo explícito y pasó. |
 | v2 | Observado · `INCUMPLIDO` | Pasaron tres casos y falló la aserción del caso cancelado con un aviso en el TRX. |
 | v3 | Observado · `EVIDENCIA_INSUFICIENTE` | Pasaron tres casos de contratos activos. Falta el caso vinculado de cancelación. |
-| Investigación MAF | Observado con HTTP simulado | MAF ejecutó las herramientas en Azure OpenAI y Anthropic simulados y el evaluador comprobó las referencias. |
+| Investigación MAF | Observado con HTTP simulado | MAF ejecutó las ramas paralelas (QA + SecOps) con checkpoints persistentes y validación de referencias. |
 | Anthropic Claude real | Observado · `COMPLETADA` | Claude Sonnet 4.6 ejecutó las herramientas sobre `v1`, `v2` y `v3` con salidas estructuradas validadas. |
-| Azure OpenAI real | Observado · `COMPLETADA` | `gpt-4.1-mini` (`GlobalStandard`) ejecutó las herramientas sobre `v1`, `v2` y `v3` con referencias validadas. |
+| Azure OpenAI real | Observado · `COMPLETADA` | `gpt-4.1-mini` (`GlobalStandard`) ejecutó las herramientas QA + SecOps sobre `v1`, `v2` y `v3`. |
+| Ciclo DevSecOps (8 etapas) | Observado en nube real | Integra Azure Boards (`AB#1` + tareas idempotentes), GitHub PR/Actions/CodeQL, Container Apps, Defender CSPM y App Insights. |
+
+### Aprobación humana y registro idempotente en Azure Boards
+
+Cuando una versión queda en `INCUMPLIDO` o `EVIDENCIA_INSUFICIENTE`, el evaluador deja una `accion_propuesta` en `PENDIENTE_APROBACION` con una huella estable (`devsecops-fp-<hash>`) y guarda `checkpoint_aprobacion.json`. Podés aprobarla o descartarla desde las tarjetas de `http://127.0.0.1:8050` o desde la CLI:
+
+```sh
+assessment/.venv/bin/python -m assessment aprobar --ejecucion <id_ejecucion> --motivo "Aprobado en revisión de entrega"
+assessment/.venv/bin/python -m assessment descartar --ejecucion <id_ejecucion> --motivo "Se cubrirá en el siguiente sprint"
+```
+Si volvés a evaluar y aprobar la misma brecha, el ejecutor detecta el tag `devsecops-fp-<hash>` mediante WIQL y **actualiza el Work Item existente en Azure Boards en lugar de duplicarlo**.
