@@ -1,0 +1,10 @@
+.git
+.github
+.playwright-mcp
+.serena
+assessment
+**/bin
+**/obj
+**/TestResults
+**/evidencia
+**/datos.json*

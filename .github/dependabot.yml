@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: "nuget"
+    directory: "/v1/src/Contratos"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "pip"
+    directory: "/assessment"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

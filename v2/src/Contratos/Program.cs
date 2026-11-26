@@ -1,8 +1,21 @@
+using System.Diagnostics;
+using System.Net.Http.Json;
 using System.Net.Mail;
 using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
+var telemetria = Telemetria.Crear(Environment.GetEnvironmentVariable("APPLICATIONINSIGHTS_CONNECTION_STRING"));
+if (telemetria is not null)
+{
+    app.Use(async (ctx, next) =>
+    {
+        var inicio = DateTimeOffset.UtcNow;
+        var reloj = Stopwatch.StartNew();
+        try { await next(); }
+        finally { telemetria.Registrar(ctx.Request.Method, ctx.Request.Path, ctx.Response.StatusCode, reloj.Elapsed, inicio); }
+    });
+}
 var archivo = Path.Combine(app.Environment.ContentRootPath, "datos.json");
 var puerta = new object();
 Datos Leer() => File.Exists(archivo)
@@ -52,5 +65,52 @@ app.MapPost("/api/evaluar", (DateOnly? fecha) => fecha is null || fecha == defau
         Renovaciones.Evaluar(datos, fecha.Value);
         return Results.Ok(datos.Avisos);
     }));
+app.MapGet("/api/salud", () => Results.Ok(new
+{
+    estado = "ok",
+    version = Environment.GetEnvironmentVariable("APP_VERSION") ?? "local",
+    commit = Environment.GetEnvironmentVariable("APP_COMMIT_SHA") ?? "local"
+}));
 app.Run();
 record Alta(string Numero, string Cliente, string Correo, DateOnly Renovacion);
+sealed record Telemetria(string Clave, Uri Destino)
+{
+    static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(5) };
+    public static Telemetria? Crear(string? cadena)
+    {
+        if (string.IsNullOrWhiteSpace(cadena)) return null;
+        var partes = cadena.Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Select(p => p.Split('=', 2))
+            .Where(p => p.Length == 2)
+            .ToDictionary(p => p[0].Trim(), p => p[1].Trim(), StringComparer.OrdinalIgnoreCase);
+        return partes.TryGetValue("InstrumentationKey", out var ikey) && partes.TryGetValue("IngestionEndpoint", out var ep)
+            ? new Telemetria(ikey, new Uri(ep.TrimEnd('/') + "/v2/track"))
+            : null;
+    }
+    public void Registrar(string metodo, string ruta, int estado, TimeSpan duracion, DateTimeOffset inicio)
+    {
+        var carga = new[]
+        {
+            new
+            {
+                name = "Microsoft.ApplicationInsights.Request",
+                time = inicio.ToString("O"),
+                iKey = Clave,
+                data = new
+                {
+                    baseType = "RequestData",
+                    baseData = new
+                    {
+                        ver = 2,
+                        id = Guid.NewGuid().ToString("N"),
+                        name = $"{metodo} {ruta}",
+                        duration = duracion.ToString(@"dd\.hh\:mm\:ss\.fffffff"),
+                        responseCode = estado.ToString(),
+                        success = estado < 400
+                    }
+                }
+            }
+        };
+        _ = Http.PostAsJsonAsync(Destino, carga);
+    }
+}
