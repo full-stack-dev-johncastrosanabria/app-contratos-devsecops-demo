@@ -1,23 +1,510 @@
-<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Contratos · Renovaciones</title>
-<style>*{box-sizing:border-box}body{font:16px/1.5 system-ui;color:#162d37;background:#f2f6f5;margin:0}main{max-width:1000px;margin:auto;padding:32px 18px}h1{font-size:2.8rem;margin:0;color:#123c42}section{background:white;padding:22px;border-radius:12px;margin:18px 0}form,.fila{display:flex;align-items:end;gap:12px;flex-wrap:wrap}label{display:grid;gap:4px}input,button{font:inherit;border:1px solid #73918e;border-radius:6px;padding:7px}button{cursor:pointer;color:white;background:#12655c}.fila{align-items:center;border-top:1px solid #ddd;padding:10px 0}.fila span{flex:1;min-width:170px}h2{margin-top:0;font-size:1.3rem}</style>
-<main><h1>Contratos</h1><section><h2>Registrar contrato</h2><form id="alta"><label>Número<input name="numero" required></label><label>Cliente<input name="cliente" required></label><label>Correo del responsable<input name="correo" type="email" required></label><label>Renovación<input name="renovacion" type="date" required></label><button>Guardar</button></form></section><section><h2>Cartera</h2><div id="lista"></div></section><section><h2>Evaluar renovaciones</h2><p>Genera avisos locales a 30, 7 y 1 día del vencimiento.</p><form id="evaluar"><label>Fecha de evaluación<input id="fecha" type="date" required></label><button>Evaluar</button></form><h3>Bandeja de avisos simulados</h3><div id="avisos"></div></section><p role="status" id="estado"></p></main><script>
-const $ = id => document.getElementById(id);
-const hoy = new Date();
-$('fecha').value = new Date(hoy.getTime()-hoy.getTimezoneOffset()*60000).toISOString().slice(0,10);
-async function cargar(){
- const res=await fetch('/api/contratos'); if(!res.ok) throw Error('No se pudo cargar la cartera.');
- const datos=await res.json(); $('lista').textContent=datos.contratos.length?'':'Todavía no hay contratos.';
- for(const c of datos.contratos){
-  const fila=document.createElement('div');fila.className='fila';
-  const texto=document.createElement('span');texto.textContent=[c.numero,c.cliente,c.renovacion,c.cancelado?'Cancelado':'Activo'].join(' · ');fila.append(texto);
-  if(!c.cancelado){const btn=document.createElement('button');btn.textContent='Cancelar contrato';btn.onclick=()=>{if(confirm('¿Cancelar el contrato '+c.numero+'?')) enviar('/api/contratos/'+c.id+'/cancelar')};fila.append(btn)}
-  $('lista').append(fila);
- }
- $('avisos').textContent=datos.avisos.length?'':'Sin avisos.';
- for(const a of datos.avisos){const p=document.createElement('p');p.textContent=[datos.contratos.find(c=>c.id===a.contratoId)?.numero,a.destinatario,a.dias+' días',a.renovacion].join(' · ');$('avisos').append(p)}
-}
-async function enviar(url,body){try{const r=await fetch(url,{method:'POST',headers:body?{'Content-Type':'application/json'}:{},body:body&&JSON.stringify(body)});if(!r.ok) throw Error(await r.text()||'Error al guardar');await cargar();$('estado').textContent='Operación completada.';return true}catch(e){$('estado').textContent=e.message;return false}}
-$('alta').onsubmit=async e=>{e.preventDefault();if(await enviar('/api/contratos',Object.fromEntries(new FormData($('alta'))))) $('alta').reset()};
-$('evaluar').onsubmit=e=>{e.preventDefault();enviar('/api/evaluar?fecha='+$('fecha').value)};
-cargar().catch(e=>$('estado').textContent=e.message);
-</script></html>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NextGen DevSecOps Assessment · Portal de Contratos (REN-001)</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg-page: #f0f5fc;
+      --bg-surface: #ffffff;
+      --bg-subtle: #e5effc;
+      --bg-tint: #f7faff;
+      --ink-strong: #091a36;
+      --ink-body: #1e3557;
+      --ink-muted: #415a80;
+      --line-soft: #cad9ef;
+      --line-strong: #8fb0de;
+      --blue-950: #061329;
+      --blue-900: #0a2146;
+      --blue-800: #0f3269;
+      --blue-700: #154694;
+      --blue-600: #1d5bbf;
+      --blue-500: #2563eb;
+      --cyan-400: #38bdf8;
+      --pass-bg: #dff4ec;
+      --pass-ink: #0c4a34;
+      --pass-border: #68b898;
+      --fail-bg: #fde8e8;
+      --fail-ink: #7f1d1d;
+      --fail-border: #e08383;
+      --warn-bg: #fef3c7;
+      --warn-ink: #6b4407;
+      --warn-border: #d9a441;
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      color: var(--ink-strong);
+      background: radial-gradient(circle at 12% 0%, #dbeafe 0%, var(--bg-page) 45%);
+      scrollbar-gutter: stable;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-block-size: 100dvh; display: flex; flex-direction: column; }
+    h1, h2, h3, p { margin: 0; }
+    code { font: 600 0.86em/1.3 ui-monospace, SFMono-Regular, monospace; }
+    :focus-visible { outline: 3px solid var(--blue-500); outline-offset: 2px; }
+    .frame { inline-size: min(1140px, calc(100% - 40px)); margin-inline: auto; }
+
+    .masthead {
+      background: linear-gradient(108deg, var(--blue-950) 0%, var(--blue-900) 55%, var(--blue-800) 100%);
+      color: #f8fbff;
+      border-block-end: 1px solid rgba(56, 189, 248, 0.3);
+      box-shadow: 0 6px 20px rgba(6, 19, 41, 0.22);
+    }
+    .topbar {
+      min-block-size: 66px;
+      padding-block: 10px;
+      display: flex;
+      align-items: safe center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .brand { display: flex; align-items: center; gap: 11px; font-weight: 750; font-size: 1.04rem; }
+    .brand small { display: block; font-weight: 500; font-size: 0.75rem; color: #bae6fd; }
+    .brand-mark {
+      display: grid; place-items: center; inline-size: 34px; block-size: 34px; border-radius: 10px;
+      background: linear-gradient(135deg, var(--cyan-400), var(--blue-500)); color: var(--blue-950); font-weight: 800;
+    }
+    .interop-links { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .pill-link, .ver-chip {
+      display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px;
+      font-size: 0.8rem; font-weight: 650; text-decoration: none;
+      color: #eef6ff; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(147, 197, 253, 0.36);
+    }
+    .pill-link:hover { background: rgba(56, 189, 248, 0.24); border-color: var(--cyan-400); }
+    .ver-chip { background: rgba(56, 189, 248, 0.2); border-color: var(--cyan-400); color: #ffffff; }
+
+    main { padding-block: 28px 46px; display: grid; gap: 20px; }
+    .hero-banner {
+      background: linear-gradient(145deg, #ffffff 0%, #eaf3ff 100%);
+      border: 1px solid var(--line-strong);
+      border-radius: 16px;
+      padding: 20px 24px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.9fr);
+      gap: 18px;
+      align-items: center;
+      box-shadow: 0 10px 28px -14px rgba(9, 26, 54, 0.15);
+    }
+    .kicker {
+      display: inline-block; font: 700 0.74rem/1.2 ui-monospace, monospace;
+      padding: 5px 9px; border-radius: 6px; background: var(--blue-800); color: #ffffff; margin-block-end: 8px;
+    }
+    h1 { font-size: clamp(1.85rem, 3.6vw, 2.55rem); color: var(--blue-950); letter-spacing: -0.04em; margin-block-end: 6px; }
+    .subcopy { color: var(--ink-body); font-size: 0.95rem; }
+
+    .sim-box {
+      background: var(--blue-950); color: #eff6ff; border-radius: 13px; padding: 15px 16px;
+      border: 1px solid #1e427a; display: grid; gap: 9px;
+    }
+    .sim-box h2 { font-size: 0.95rem; color: #ffffff; }
+    .sim-box p { font-size: 0.8rem; color: #bfdbfe; }
+
+    .kpi-grid {
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px;
+    }
+    .kpi {
+      background: var(--bg-surface); border: 1px solid var(--line-soft); border-radius: 12px;
+      padding: 13px 16px; border-inline-start: 4px solid var(--blue-600);
+    }
+    .kpi span { display: block; font-size: 0.77rem; font-weight: 700; color: var(--ink-muted); }
+    .kpi strong { font-size: 1.55rem; color: var(--blue-950); letter-spacing: -0.03em; }
+
+    .workspace-grid {
+      display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 18px; align-items: start;
+    }
+    .panel {
+      background: var(--bg-surface); border: 1px solid var(--line-soft); border-radius: 15px;
+      padding: 20px; display: grid; gap: 14px;
+      box-shadow: 0 8px 24px -14px rgba(9, 26, 54, 0.14);
+    }
+    .panel h2 { font-size: 1.15rem; color: var(--blue-950); }
+    .panel-desc { font-size: 0.84rem; color: var(--ink-muted); }
+
+    .form-grid {
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end;
+    }
+    label { display: grid; gap: 5px; font-size: 0.82rem; font-weight: 700; color: var(--blue-900); }
+    input, button { font: inherit; border-radius: 8px; }
+    input {
+      min-block-size: 42px; padding-inline: 11px; border: 1px solid var(--line-strong);
+      background: #ffffff; color: var(--ink-strong); inline-size: 100%;
+    }
+    button {
+      min-block-size: 42px; padding-inline: 15px; font-weight: 700; font-size: 0.88rem;
+      cursor: pointer; border: 1px solid transparent; transition: background 0.15s ease;
+    }
+    .btn-primary { background: linear-gradient(135deg, var(--blue-600), var(--blue-800)); color: #ffffff; }
+    .btn-primary:hover { background: linear-gradient(135deg, var(--blue-500), var(--blue-700)); }
+    .btn-sim { background: linear-gradient(135deg, var(--cyan-400), #0284c7); color: var(--blue-950); inline-size: 100%; }
+    .btn-sim:hover { background: #7dd3fc; }
+    .btn-danger-outline {
+      min-block-size: 34px; padding-inline: 11px; font-size: 0.79rem;
+      background: #ffffff; color: var(--fail-ink); border-color: var(--fail-border);
+    }
+    .btn-danger-outline:hover { background: var(--fail-bg); }
+    .btn-danger { background: #b91c1c; color: #ffffff; }
+    .btn-safe { background: var(--bg-subtle); color: var(--blue-900); border-color: var(--line-strong); }
+    button:disabled { opacity: 0.65; cursor: wait; }
+
+    .status-bar {
+      padding: 10px 14px; border-radius: 10px; font-size: 0.86rem; font-weight: 650;
+      background: var(--bg-subtle); color: var(--blue-900); border: 1px solid var(--line-strong);
+    }
+    .status-bar:empty { display: none; }
+
+    .list-stack { display: grid; gap: 9px; }
+    .fila {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+      padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line-soft); background: var(--bg-tint);
+    }
+    .fila-info { display: grid; gap: 3px; min-inline-size: 200px; flex: 1; }
+    .fila-title { font-weight: 750; color: var(--blue-950); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .fila-meta { font-size: 0.81rem; color: var(--ink-muted); }
+    .tag-state {
+      font-size: 0.72rem; font-weight: 750; padding: 2px 8px; border-radius: 999px;
+      background: var(--pass-bg); color: var(--pass-ink); border: 1px solid var(--pass-border);
+    }
+    .tag-state[data-canceled="true"] {
+      background: var(--fail-bg); color: var(--fail-ink); border-color: var(--fail-border);
+    }
+
+    .aviso-card {
+      padding: 11px 13px; border-radius: 10px; border: 1px solid var(--line-soft);
+      border-inline-start: 4px solid var(--blue-600); background: #ffffff; display: grid; gap: 3px; font-size: 0.84rem;
+    }
+    .aviso-card[data-alert="violation"] {
+      border-inline-start-color: #dc2626; background: #fff5f5; border-color: var(--fail-border);
+    }
+    .empty-msg { font-size: 0.85rem; color: var(--ink-muted); padding: 12px; text-align: center; background: var(--bg-tint); border-radius: 9px; }
+
+    /* Native Modal Dialog */
+    dialog:modal {
+      overscroll-behavior: contain;
+      inline-size: min(460px, calc(100% - 28px));
+      padding: 22px; border-radius: 15px; border: 1px solid var(--line-strong);
+      background: var(--bg-surface); color: var(--ink-strong);
+      box-shadow: 0 24px 48px rgba(6, 19, 41, 0.35);
+    }
+    dialog::backdrop {
+      overflow: hidden; overscroll-behavior: contain;
+      background: rgba(6, 19, 41, 0.56); backdrop-filter: blur(2px);
+    }
+    dialog h1 { font-size: 1.25rem; margin-block-end: 8px; }
+    dialog p { font-size: 0.9rem; color: var(--ink-body); margin-block-end: 16px; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+
+    @media (max-width: 860px) {
+      .hero-banner, .workspace-grid { grid-template-columns: 1fr; }
+      .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 520px) {
+      .form-grid, .kpi-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="masthead">
+    <div class="frame topbar">
+      <span class="brand">
+        <span class="brand-mark" aria-hidden="true">C</span>
+        <span>NextGen DevSecOps Assessment <small>Sujeto de Prueba · Cartera y Renovaciones</small></span>
+      </span>
+      <nav class="interop-links" aria-label="Interoperabilidad con Evaluador DevSecOps">
+        <span class="ver-chip" id="instancia-chip">Versión local</span>
+        <a class="pill-link" id="volver-evaluador" href="http://127.0.0.1:8050">← Consola Evaluador (:8050)</a>
+        <a class="pill-link" id="reevaluar-link" href="http://127.0.0.1:8050">Auditar en MAF ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="frame">
+    <section class="hero-banner" aria-labelledby="app-title">
+      <div>
+        <span class="kicker" id="regla-kicker">REGLA DE NEGOCIO · REN-001</span>
+        <h1 id="app-title">Contratos y Avisos de Renovación</h1>
+        <p class="subcopy" id="comportamiento-desc">
+          Registrá contratos vigentes, gestioná bajas y ejecutá la evaluación de vencimientos a 30, 7 y 1 día. Los contratos cancelados no deben recibir nuevos avisos.
+        </p>
+      </div>
+      <div class="sim-box">
+        <h2>⚡ Simulador guiado REN-001</h2>
+        <p>Crea un contrato que vence en 7 días, lo cancela inmediatamente y ejecuta la evaluación para observar en vivo cómo responde esta versión.</p>
+        <button type="button" class="btn-sim" id="btn-simular">Ejecutar simulación REN-001 →</button>
+      </div>
+    </section>
+
+    <p role="status" id="estado" class="status-bar"></p>
+
+    <section class="kpi-grid" aria-label="Indicadores de cartera">
+      <div class="kpi"><span>Total en cartera</span><strong id="kpi-total">0</strong></div>
+      <div class="kpi"><span>Contratos activos</span><strong id="kpi-activos">0</strong></div>
+      <div class="kpi"><span>Contratos cancelados</span><strong id="kpi-cancelados">0</strong></div>
+      <div class="kpi"><span>Avisos emitidos</span><strong id="kpi-avisos">0</strong></div>
+    </section>
+
+    <div class="workspace-grid">
+      <div class="list-stack">
+        <section class="panel" aria-labelledby="alta-title">
+          <div>
+            <h2 id="alta-title">Registrar nuevo contrato</h2>
+            <p class="panel-desc">Ingresá un número único de contrato y su fecha programada de renovación.</p>
+          </div>
+          <form id="alta" class="form-grid">
+            <label>Número de contrato
+              <input name="numero" placeholder="Ej. CTR-2026-104" required>
+            </label>
+            <label>Cliente / Organización
+              <input name="cliente" autocomplete="organization" placeholder="Ej. Grupo Comercial S.A." required>
+            </label>
+            <label>Correo del responsable
+              <input name="correo" type="email" inputmode="email" autocomplete="email" placeholder="responsable@empresa.com" required>
+            </label>
+            <label>Fecha de renovación
+              <input name="renovacion" id="alta-renovacion" type="date" required>
+            </label>
+            <div style="grid-column: 1 / -1;">
+              <button type="submit" class="btn-primary">Guardar contrato en cartera</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel" aria-labelledby="cartera-title">
+          <div>
+            <h2 id="cartera-title">Cartera registrada</h2>
+            <p class="panel-desc">Podés dar de baja cualquier contrato activo antes de correr la evaluación de renovaciones.</p>
+          </div>
+          <div id="lista" class="list-stack"></div>
+        </section>
+      </div>
+
+      <section class="panel" aria-labelledby="eval-title">
+        <div>
+          <h2 id="eval-title">Evaluar renovaciones</h2>
+          <p class="panel-desc">Genera avisos simulados cuando faltan exactamente <strong>30, 7 o 1 día</strong> entre la fecha de corte y el vencimiento.</p>
+        </div>
+        <form id="evaluar" class="form-grid">
+          <label>Fecha de evaluación
+            <input id="fecha" type="date" required>
+          </label>
+          <button type="submit" class="btn-primary">Evaluar cartera</button>
+        </form>
+        <h3>Bandeja de avisos emitidos</h3>
+        <div id="avisos" class="list-stack"></div>
+      </section>
+    </div>
+  </main>
+
+  <dialog id="confirmar-baja" aria-labelledby="baja-titulo">
+    <h1 id="baja-titulo">¿Cancelar este contrato?</h1>
+    <p id="baja-detalle">Una vez cancelado, según el criterio REN-001 no debería generar nuevos avisos de renovación.</p>
+    <form method="dialog" class="dialog-actions">
+      <button value="conservar" class="btn-safe" autofocus>Conservar activo</button>
+      <button value="cancelar" class="btn-danger">Confirmar cancelación</button>
+    </form>
+  </dialog>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const hoyLocal = () => {
+      const d = new Date();
+      return new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+    };
+    const sumarDias = (baseIso, dias) => {
+      const [y, m, d] = baseIso.split("-").map(Number);
+      const dt = new Date(Date.UTC(y, m - 1, d + dias));
+      return dt.toISOString().slice(0, 10);
+    };
+
+    const hoyIso = hoyLocal().toISOString().slice(0, 10);
+    $("fecha").value = hoyIso;
+    $("alta-renovacion").value = sumarDias(hoyIso, 7);
+
+    const dialogBaja = $("confirmar-baja");
+    let contratoPendienteBaja = null;
+
+    dialogBaja.addEventListener("close", () => {
+      const eleccion = dialogBaja.returnValue;
+      dialogBaja.returnValue = "";
+      if (eleccion === "cancelar" && contratoPendienteBaja) {
+        const id = contratoPendienteBaja.id;
+        contratoPendienteBaja = null;
+        enviar(`/api/contratos/${id}/cancelar`);
+      } else {
+        contratoPendienteBaja = null;
+      }
+    });
+
+    const descripcionesVersion = {
+      v1: "Instancia v1 activa: el motor excluye contratos cancelados y cuenta con prueba xUnit vinculada a REN-001 (VERIFICADO).",
+      v2: "Instancia v2 activa (defecto deliberado): el motor omite el filtro Cancelado y emitirá avisos indebidos al evaluar (INCUMPLIDO).",
+      v3: "Instancia v3 activa: el motor excluye cancelados en producción, pero su suite xUnit carece de evidencia para REN-001 (EVIDENCIA INSUFICIENTE).",
+    };
+
+    async function configurarInteroperabilidad() {
+      const params = new URLSearchParams(window.location.search);
+      const evaluadorUrl = params.get("evaluador") || "http://127.0.0.1:8050";
+      let ver = params.get("version") || "";
+      try {
+        const r = await fetch("/api/salud");
+        if (r.ok) {
+          const salud = await r.json();
+          if (salud.version && salud.version !== "local") ver = salud.version;
+        }
+      } catch {}
+      $("volver-evaluador").href = evaluadorUrl;
+      if (ver) {
+        $("instancia-chip").textContent = `Instancia · ${ver.toUpperCase()}`;
+        $("reevaluar-link").href = `${evaluadorUrl}/?autoevaluar=${encodeURIComponent(ver)}`;
+        if (descripcionesVersion[ver]) $("comportamiento-desc").textContent = descripcionesVersion[ver];
+      } else {
+        $("reevaluar-link").href = evaluadorUrl;
+      }
+    }
+
+    async function cargar() {
+      const res = await fetch("/api/contratos");
+      if (!res.ok) throw new Error("No se pudo cargar la cartera.");
+      const datos = await res.json();
+
+      const total = datos.contratos.length;
+      const cancelados = datos.contratos.filter((c) => c.cancelado).length;
+      $("kpi-total").textContent = String(total);
+      $("kpi-activos").textContent = String(total - cancelados);
+      $("kpi-cancelados").textContent = String(cancelados);
+      $("kpi-avisos").textContent = String(datos.avisos.length);
+
+      $("lista").replaceChildren();
+      if (!datos.contratos.length) {
+        const vacio = document.createElement("p");
+        vacio.className = "empty-msg";
+        vacio.textContent = "Todavía no hay contratos registrados en esta cartera.";
+        $("lista").append(vacio);
+      }
+      for (const c of datos.contratos) {
+        const fila = document.createElement("div");
+        fila.className = "fila";
+        const info = document.createElement("div");
+        info.className = "fila-info";
+        const title = document.createElement("div");
+        title.className = "fila-title";
+        const num = document.createElement("span");
+        num.textContent = `${c.numero} · ${c.cliente}`;
+        const tag = document.createElement("span");
+        tag.className = "tag-state";
+        tag.dataset.canceled = String(c.cancelado);
+        tag.textContent = c.cancelado ? "✕ Cancelado" : "✓ Activo";
+        title.append(num, tag);
+
+        const meta = document.createElement("div");
+        meta.className = "fila-meta";
+        meta.textContent = `Responsable: ${c.correo} · Renovación: ${c.renovacion}`;
+        info.append(title, meta);
+        fila.append(info);
+
+        if (!c.cancelado) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "btn-danger-outline";
+          btn.textContent = "Cancelar contrato";
+          btn.addEventListener("click", () => {
+            contratoPendienteBaja = c;
+            $("baja-detalle").textContent = `Se marcará como cancelado el contrato ${c.numero} (${c.cliente}). Según REN-001, no debe recibir futuros avisos.`;
+            dialogBaja.showModal();
+          });
+          fila.append(btn);
+        }
+        $("lista").append(fila);
+      }
+
+      $("avisos").replaceChildren();
+      if (!datos.avisos.length) {
+        const sin = document.createElement("p");
+        sin.className = "empty-msg";
+        sin.textContent = "Sin avisos emitidos en la bandeja.";
+        $("avisos").append(sin);
+      }
+      for (const a of datos.avisos) {
+        const origen = datos.contratos.find((c) => c.id === a.contratoId);
+        const card = document.createElement("div");
+        card.className = "aviso-card";
+        if (origen?.cancelado) card.dataset.alert = "violation";
+        const top = document.createElement("strong");
+        top.textContent = `${origen?.numero || "Contrato"} → ${a.destinatario}` + (origen?.cancelado ? " · ¡Emitido a contrato cancelado!" : "");
+        const sub = document.createElement("span");
+        sub.className = "fila-meta";
+        sub.textContent = `Vence en ${a.dias} día(s) (${a.renovacion})`;
+        card.append(top, sub);
+        $("avisos").append(card);
+      }
+      return datos;
+    }
+
+    async function enviar(url, body, mensajeExito = "Operación completada.") {
+      try {
+        const r = await fetch(url, {
+          method: "POST",
+          headers: body ? { "Content-Type": "application/json" } : {},
+          body: body && JSON.stringify(body),
+        });
+        if (!r.ok) throw new Error((await r.text()) || "Error al procesar la operación.");
+        const resJson = r.headers.get("content-type")?.includes("application/json") ? await r.json() : null;
+        await cargar();
+        $("estado").textContent = mensajeExito;
+        return resJson ?? true;
+      } catch (e) {
+        $("estado").textContent = e.message;
+        return null;
+      }
+    }
+
+    $("alta").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const payload = Object.fromEntries(new FormData($("alta")));
+      if (await enviar("/api/contratos", payload, `Contrato ${payload.numero} registrado correctamente.`)) {
+        $("alta").reset();
+        $("alta-renovacion").value = sumarDias($("fecha").value || hoyIso, 7);
+      }
+    });
+
+    $("evaluar").addEventListener("submit", (e) => {
+      e.preventDefault();
+      enviar(`/api/evaluar?fecha=${$("fecha").value}`, null, `Evaluación ejecutada para fecha de corte ${$("fecha").value}.`);
+    });
+
+    $("btn-simular").addEventListener("click", async () => {
+      const btn = $("btn-simular");
+      btn.disabled = true;
+      try {
+        const fechaBase = $("fecha").value || hoyIso;
+        const vencimiento = sumarDias(fechaBase, 7);
+        const sufijo = String(Date.now()).slice(-4);
+        const numero = `REN-${sufijo}`;
+        $("estado").textContent = `Paso 1/3 · Creando contrato ${numero} con vencimiento a 7 días (${vencimiento})…`;
+        const creado = await enviar("/api/contratos", {
+          numero,
+          cliente: "Cliente Prueba REN-001",
+          correo: "auditoria.ren001@crnova.com",
+          renovacion: vencimiento,
+        });
+        if (!creado || !creado.id) return;
+
+        $("estado").textContent = `Paso 2/3 · Cancelando contrato ${numero} antes de evaluar…`;
+        await enviar(`/api/contratos/${creado.id}/cancelar`);
+
+        $("estado").textContent = `Paso 3/3 · Evaluando renovaciones al ${fechaBase}…`;
+        const avisos = await enviar(`/api/evaluar?fecha=${fechaBase}`);
+        const violacion = Array.isArray(avisos) && avisos.some((a) => a.contratoId === creado.id);
+        $("estado").textContent = violacion
+          ? `✕ INCUMPLIMIENTO REN-001 OBSERVADO: El contrato cancelado ${numero} generó un aviso en la bandeja.`
+          : `✓ CUMPLIMIENTO REN-001 OBSERVADO: El contrato cancelado ${numero} fue excluido y generó 0 avisos.`;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    configurarInteroperabilidad();
+    cargar().catch((e) => { $("estado").textContent = e.message; });
+  </script>
+</body>
+</html>

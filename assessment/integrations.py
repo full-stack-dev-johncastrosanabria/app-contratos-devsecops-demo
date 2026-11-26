@@ -127,7 +127,7 @@ def fetch_github_context(settings: dict[str, str], commit_sha: str | None) -> di
     repo = settings.get("GITHUB_REPO", "")
     if not repo:
         return {"disponible": False, "motivo": "GITHUB_REPO no configurado."}
-    headers = {"Accept": "application/vnd.github+json", "User-Agent": "AppContratos-DevSecOps"}
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "NextGen-DevSecOps-Assessment"}
     token = _gh_token(settings)
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -209,9 +209,6 @@ def fetch_azure_runtime(settings: dict[str, str]) -> dict:
         ca = _http_json("GET", f"https://management.azure.com{app_id}?api-version=2024-03-01", arm_headers)
         props = ca.get("properties", {})
         ingress = (props.get("configuration") or {}).get("ingress") or {}
-        containers = ((props.get("template") or {}).get("containers") or [{}])
-        env_list = {e.get("name"): e.get("value") for e in (containers[0].get("env") or []) if "value" in e}
-        tags = ca.get("tags") or {}
         identity_type = (ca.get("identity") or {}).get("type", "None")
         fqdn = ingress.get("fqdn")
         out["despliegue"] = {
@@ -220,10 +217,6 @@ def fetch_azure_runtime(settings: dict[str, str]) -> dict:
             "ambiente": "pruebas-cloud",
             "recurso_id": app_id,
             "estado": props.get("provisioningState"),
-            "revision_activa": props.get("latestReadyRevisionName") or props.get("latestRevisionName"),
-            "imagen": containers[0].get("image"),
-            "version_app": env_list.get("APP_VERSION") or tags.get("app_version"),
-            "commit_desplegado": env_list.get("APP_COMMIT_SHA") or tags.get("commit_sha"),
             "url": f"https://{fqdn}" if fqdn else None,
             "https_exclusivo": not bool(ingress.get("allowInsecure", False)),
             "identidad_administrada": identity_type,
@@ -233,6 +226,21 @@ def fetch_azure_runtime(settings: dict[str, str]) -> dict:
 
     posture_findings = []
     desp = out["despliegue"]
+    ready_revision = props.get("latestReadyRevisionName") if desp.get("recurso") else None
+    if ready_revision:
+        try:
+            revision_name = urllib.parse.quote(ready_revision, safe="")
+            revision = _http_json(
+                "GET", f"https://management.azure.com{app_id}/revisions/{revision_name}?api-version=2024-03-01",
+                arm_headers,
+            )["properties"]
+            if revision.get("active") is True and revision.get("provisioningState") == "Provisioned":
+                container = ((revision.get("template") or {}).get("containers") or [{}])[0]
+                env = {entry["name"]: entry.get("value") for entry in container.get("env") or []}
+                desp.update(revision_activa=ready_revision, imagen=container.get("image"),
+                            version_app=env.get("APP_VERSION"), commit_desplegado=env.get("APP_COMMIT_SHA"))
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            desp["motivo"] = "No se pudo verificar la revisión activa de Container Apps."
     if desp.get("identidad_administrada") in (None, "None"):
         posture_findings.append({
             "codigo": "AZ-POSTURE-MI-001",

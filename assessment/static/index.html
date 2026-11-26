@@ -1,71 +1,170 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Evaluador de renovaciones · NextGen DevSecOps Assessment</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NextGen DevSecOps Assessment · Evaluador de renovaciones</title>
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
   <header class="masthead">
     <div class="frame topbar">
-      <span class="brand"><span class="brand-mark" aria-hidden="true">✓</span> AppContratos · NextGen DevSecOps</span>
-      <span class="local"><span aria-hidden="true"></span> Azure AI Foundry + MAF</span>
+      <div class="brand-group">
+        <span class="brand">
+          <span class="brand-mark" aria-hidden="true">∞</span>
+          <span>NextGen DevSecOps Assessment <small>Evaluación Continua · Caso REN-001</small></span>
+        </span>
+      </div>
+      <nav class="ecosystem-nav" aria-label="Sistemas conectados del ecosistema">
+        <a id="nav-boards" class="eco-pill" href="https://dev.azure.com/jcastros0696/AppContratos/_workitems/edit/1" target="_blank" rel="noopener">
+          <span aria-hidden="true">📋</span> Azure Boards · AB#1
+        </a>
+        <a id="nav-pr" class="eco-pill" href="https://github.com/full-stack-dev-johncastrosanabria/nextgen-devsecops-assessment/pull/1" target="_blank" rel="noopener">
+          <span aria-hidden="true">🔀</span> GitHub · PR #1
+        </a>
+        <a id="nav-sec" class="eco-pill" href="https://github.com/full-stack-dev-johncastrosanabria/nextgen-devsecops-assessment/security" target="_blank" rel="noopener">
+          <span aria-hidden="true">🛡️</span> CodeQL + Dependabot
+        </a>
+        <span class="eco-status" id="sandbox-pill">
+          <span class="pulse" aria-hidden="true"></span>
+          <span id="sandbox-text">App local: verificando…</span>
+        </span>
+      </nav>
     </div>
   </header>
+
   <main class="frame">
-    <section class="intro" aria-labelledby="title">
-      <span class="criterion">REN-001 · 8 Etapas DevSecOps</span>
-      <h1 id="title">Evaluador de renovaciones</h1>
-      <p>Al evaluar renovaciones, un contrato cancelado no debe generar un aviso.</p>
-      <ol class="flow" aria-label="Pasos de la evaluación">
-        <li>Resolver contexto (Boards · GitHub · Azure)</li>
-        <li>Agentes paralelos (QA + SecOps)</li>
-        <li>Política determinista</li>
-        <li>Aprobación humana en Boards</li>
-      </ol>
+    <section class="hero" aria-labelledby="title">
+      <div class="hero-copy">
+        <div class="hero-chips">
+          <span class="criterion">CRITERIO REN-001</span>
+          <span class="policy-chip">Política determinista REN-001.v2</span>
+          <span class="foundry-chip">Azure AI Foundry · MAF Fan-Out / Fan-In</span>
+        </div>
+        <h1 id="title">Evaluador de renovaciones</h1>
+        <p class="hero-lead">
+          <strong>Regla auditada:</strong> Al evaluar renovaciones, un contrato cancelado nunca debe generar un aviso.
+          Dos agentes especializados investigan en paralelo las 8 etapas del ciclo de vida mientras una política determinista certifica la evidencia y gobierna las acciones en Azure Boards.
+        </p>
+      </div>
+
+      <aside class="bridge-card" aria-labelledby="bridge-title">
+        <div class="bridge-head">
+          <h2 id="bridge-title">Puente Interoperable · AppContratos</h2>
+          <span class="bridge-sub">Lanzá cualquier versión real en <code>127.0.0.1:5080</code> para probar su comportamiento en vivo e ir y volver sin fricción.</span>
+        </div>
+        <div class="bridge-actions">
+          <button type="button" class="btn-ghost" data-launch="v1">Abrir App v1 ↗</button>
+          <button type="button" class="btn-ghost" data-launch="v2">Abrir App v2 ↗</button>
+          <button type="button" class="btn-ghost" data-launch="v3">Abrir App v3 ↗</button>
+          <button type="button" class="btn-subtle" id="stop-sandbox" hidden>Detener :5080</button>
+        </div>
+      </aside>
+    </section>
+
+    <section class="cycle-panel" aria-labelledby="cycle-heading">
+      <div class="section-head">
+        <div>
+          <h2 id="cycle-heading">Mapa Interactivo de las 8 Etapas DevSecOps</h2>
+          <p class="section-sub">Seleccioná cualquier etapa para abrir el inspector descriptivo con la pregunta de gobierno, la evidencia observada y accesos directos a cada herramienta.</p>
+        </div>
+      </div>
+
+      <div class="infinity-grid">
+        <div class="loop-column" aria-label="Bucle DevSec: Planificación a Pruebas">
+          <span class="loop-label">Ciclo DevSec · Código y Evidencia</span>
+          <div class="loop-stages" id="loop-devsec"></div>
+        </div>
+
+        <div class="core-hub" aria-label="Núcleo de IA, Seguridad y Gobernanza">
+          <div class="hub-badge">
+            <span class="hub-icon" aria-hidden="true">🧠 · 🔒 · 🏛️</span>
+            <strong>IA + Seguridad + Gobernanza</strong>
+            <span>Agente QA ∥ Agente SecOps → Evaluador determinista → HITL Boards</span>
+          </div>
+        </div>
+
+        <div class="loop-column" aria-label="Bucle CloudOps: Despliegue a Optimización">
+          <span class="loop-label">Ciclo CloudOps · Nube y Mejora Continua</span>
+          <div class="loop-stages" id="loop-cloudops"></div>
+        </div>
+      </div>
     </section>
 
     <form class="controls" id="controls">
       <div class="fields">
-        <label>Versión
+        <label>Alcance de evaluación
           <select name="version">
-            <option value="todas">Las tres versiones</option>
-            <option value="v1">Versión 1 (Cumple + Evidencia)</option>
-            <option value="v2">Versión 2 (Defecto funcional)</option>
-            <option value="v3">Versión 3 (Sin prueba vinculada)</option>
+            <option value="todas">Comparar las tres versiones (v1 · v2 · v3)</option>
+            <option value="v1">Versión 1 · Cumple código y prueba vinculada</option>
+            <option value="v2">Versión 2 · Regresión funcional en cancelados</option>
+            <option value="v3">Versión 3 · Pipeline en verde sin evidencia REN-001</option>
           </select>
         </label>
-        <label>Modo
+        <label>Motor de análisis
           <select name="modo" aria-describedby="mode-help">
-            <option value="agente">Con agentes MAF (QA + SecOps)</option>
-            <option value="solo-evidencia">Solo evidencia determinista</option>
+            <option value="agente">Con agentes MAF en paralelo (QA + SecOps)</option>
+            <option value="solo-evidencia">Solo evidencia determinista (0 tokens)</option>
           </select>
         </label>
-        <button type="submit">Ejecutar evaluación <span aria-hidden="true">→</span></button>
+        <div class="control-cta">
+          <button type="submit" class="btn-primary">Ejecutar evaluación <span aria-hidden="true">→</span></button>
+          <button type="button" class="btn-secondary" id="load-latest" hidden>Restaurar última corrida</button>
+        </div>
       </div>
-      <p id="mode-help">Ejecuta en paralelo los agentes de QA y Seguridad/Operación sobre Azure AI Foundry; el veredicto es determinista.</p>
+      <p id="mode-help">Ejecuta en paralelo los agentes de QA y Seguridad/Operación sobre Azure AI Foundry; el veredicto siempre es determinista.</p>
     </form>
 
     <section class="results" aria-labelledby="results-title">
       <div class="results-head">
-        <h2 id="results-title">Resultados</h2>
-        <p id="status" role="status">Listo para ejecutar</p>
+        <div>
+          <h2 id="results-title">Matriz Comparativa de Entregas</h2>
+          <p class="section-sub">Contrastá cómo responde el evaluador ante una entrega conforme (v1), un fallo funcional (v2) y una brecha silenciosa de cobertura (v3).</p>
+        </div>
+        <p id="status" class="status-pill" role="status">Listo para ejecutar</p>
       </div>
       <div class="cards" id="results" aria-busy="false"></div>
     </section>
   </main>
 
+  <footer class="site-footer frame">
+    <p>Modernización del ciclo de vida DevSecOps con Microsoft Agent Framework, Azure AI Foundry, seguridad y gobernanza continua.</p>
+  </footer>
+
   <template id="version-card">
     <article class="card">
-      <div class="card-head"><h3></h3><span class="badge" data-state="idle">Sin ejecutar</span></div>
-      <p class="reason">El veredicto aparecerá después de ejecutar esta versión.</p>
+      <div class="card-top">
+        <div class="card-head">
+          <div>
+            <h3></h3>
+            <p class="version-role"></p>
+          </div>
+          <span class="badge" data-state="idle">• Sin ejecutar</span>
+        </div>
+        <p class="reason">Ejecutá la evaluación o restaurá la última corrida para inspeccionar el dictamen y las 8 etapas de esta entrega.</p>
+        <div class="card-interop"></div>
+      </div>
       <div class="stages"></div>
       <div class="evidence"></div>
       <div class="governance"></div>
       <div class="downloads"></div>
     </article>
   </template>
+
+  <dialog id="stage-dialog" closedby="any" aria-labelledby="stage-dialog-title">
+    <div class="modal-shell">
+      <div class="modal-header">
+        <div>
+          <span class="modal-kicker" id="stage-dialog-kicker">Etapa DevSecOps</span>
+          <h1 id="stage-dialog-title">Detalle de etapa</h1>
+        </div>
+        <form method="dialog">
+          <button type="submit" class="modal-close" aria-label="Cerrar inspector de etapa">✕ Cerrar</button>
+        </form>
+      </div>
+      <div class="modal-body" id="stage-dialog-body"></div>
+    </div>
+  </dialog>
 </body>
 </html>

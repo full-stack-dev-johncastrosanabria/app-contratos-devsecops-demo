@@ -1,4 +1,5 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import json
 import os
@@ -6,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+from threading import Event
 import unittest
 from unittest.mock import patch
 
@@ -13,13 +15,16 @@ import httpx2
 from anthropic import AsyncAnthropic
 from openai import AsyncAzureOpenAI
 
-from assessment.evidence import APP, PROJECT, collect
+from assessment.ci import matches_expected
+from assessment.evidence import APP, CRITERION, PROJECT, collect
 from assessment.policy import evaluate, source_tests
 from assessment.workflow import (
     AZURE_KEYS,
     AnthropicClient,
+    DecisionAlreadyResolved,
     OpenAIChatCompletionClient,
     Request,
+    build_eight_stages,
     resolve_human_decision,
     run,
 )
@@ -109,6 +114,15 @@ class DotnetIntegration(unittest.TestCase):
         verdict = evaluate(evidence, source_tests(sources))
         self.assertTrue(verdict["referencias"][0]["vinculada"])
         self.assertEqual(verdict["veredicto"], "EVIDENCIA_INSUFICIENTE")
+
+    def test_ci_only_accepts_the_known_v2_failure(self):
+        self.assertTrue(matches_expected(self.failed, "v2"))
+        for rows in (
+            [replace(row, error="Error ajeno a REN-001") for row in self.failed.results],
+            [replace(row, outcome="Failed") for row in self.failed.results],
+        ):
+            with self.subTest(rows=rows):
+                self.assertFalse(matches_expected(replace(self.failed, results=rows, diagnostics=[]), "v2"))
 
     def test_real_maf_tool_dispatch_with_stubbed_azure_http(self):
         evidence = self.failed
@@ -243,18 +257,100 @@ class DotnetIntegration(unittest.TestCase):
             (local_ev.directory / "informe.json").write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
 
             self.assertEqual(len(report["etapas_devsecops"]), 8)
+            self.assertIn("pregunta", report["etapas_devsecops"][0])
+            self.assertIn("datos", report["etapas_devsecops"][0])
+            self.assertEqual(report["etapas_devsecops"][0]["bloque"], "DevSec")
+            self.assertEqual(report["etapas_devsecops"][4]["bloque"], "CloudOps")
             self.assertEqual(report["investigacion_secops"]["estado"], "SOLO_EVIDENCIA")
             self.assertEqual(report["investigacion_secops"]["hallazgos"][0]["alcance"], "recurso")
             self.assertEqual(report["accion_propuesta"]["estado"], "PENDIENTE_APROBACION")
             self.assertTrue((local_ev.directory / "checkpoint_aprobacion.json").is_file())
 
-            with patch("assessment.workflow.upsert_boards_task", return_value={
+            with (patch("assessment.workflow.APPROVAL_LOCK", out_dir / "approvals.sqlite3"),
+                  patch("assessment.workflow.upsert_boards_task", return_value={
                 "operacion": "creada", "work_item_id": 7, "referencia": "AB#7",
                 "fingerprint": report["accion_propuesta"]["fingerprint"], "url": "https://dev.azure.com/org/proj/_workitems/edit/7",
-            }):
+            }) as upsert):
                 approved = resolve_human_decision(local_ev.directory, approve=True, note="Aprobado en comité")
+                self.assertEqual(resolve_human_decision(local_ev.directory, approve=True), approved)
+                with self.assertRaises(DecisionAlreadyResolved):
+                    resolve_human_decision(local_ev.directory, approve=False)
+                upsert.assert_called_once()
             self.assertEqual(approved["accion_propuesta"]["estado"], "APROBADA")
             self.assertEqual(approved["accion_propuesta"]["boards_resultado"]["referencia"], "AB#7")
+
+
+class DevSecOpsRegression(unittest.TestCase):
+    def test_deployment_requires_a_matching_revision(self):
+        deployed = dict(recurso="ca-appcontratos", estado="Succeeded", revision_activa="ca--rev1",
+                        version_app="v1", commit_desplegado="a" * 40)
+        cloud = {"habilitado": True, "azure": {"despliegue": deployed}}
+        execution = dict(version="v1", commit="a" * 40, cambios_locales=False)
+        report = dict(criterio=CRITERION, veredicto="VERIFICADO", resultados_trx=[],
+                      justificacion="", referencias=[], ejecucion=execution)
+        self.assertEqual(build_eight_stages(report, cloud)[4]["estado"], "verificado")
+        for changes in ({"version": "v2"}, {"commit": "b" * 40}, {"commit": None}, {"cambios_locales": True}):
+            with self.subTest(changes=changes):
+                report["ejecucion"] = {**execution, **changes}
+                self.assertEqual(build_eight_stages(report, cloud)[4]["estado"], "pendiente")
+        report["ejecucion"] = execution
+        deployed["revision_activa"] = None
+        self.assertEqual(build_eight_stages(report, cloud)[4]["estado"], "pendiente")
+
+    def test_concurrent_approvals_create_one_boards_task(self):
+        first_query = Event()
+        release_query = Event()
+        second_started = Event()
+        second_query = Event()
+        created = []
+
+        def api(method, url, headers, body):
+            if "/wiql?" in url:
+                if not first_query.is_set():
+                    first_query.set()
+                    self.assertTrue(release_query.wait(5))
+                else:
+                    second_query.set()
+                return {"workItems": [{"id": 7}] if created else []}
+            if method == "POST":
+                created.append(body)
+            return {"id": 7}
+
+        def approve_second(directory):
+            second_started.set()
+            return resolve_human_decision(directory, approve=True)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dirs = [root / "one" / "first", root / "two" / "second"]
+            for directory in dirs:
+                directory.mkdir(parents=True)
+                (directory / "informe.json").write_text(json.dumps({
+                    "ejecucion": {"id": directory.name, "version": "v2"},
+                    "criterio": {"id": "REN-001"}, "veredicto": "INCUMPLIDO",
+                    "accion_propuesta": {
+                        "estado": "PENDIENTE_APROBACION", "fingerprint": "abc", "tag_idempotencia": "devsecops-fp-abc",
+                        "titulo": "Corregir", "descripcion": "REN-001", "criterio_reevaluacion": "Reevaluar",
+                    },
+                }), encoding="utf-8")
+            with (patch("assessment.workflow.APPROVAL_LOCK", root / "lock" / "approvals.sqlite3"),
+                  patch("assessment.integrations.load_settings", return_value={
+                      "AZURE_DEVOPS_ORG_URL": "https://dev.azure.com/org",
+                      "AZURE_DEVOPS_PROJECT": "proj", "AZURE_DEVOPS_PAT": "test-token",
+                  }),
+                  patch("assessment.integrations._http_json", side_effect=api),
+                  ThreadPoolExecutor(max_workers=2) as pool):
+                first = pool.submit(resolve_human_decision, dirs[0], True)
+                try:
+                    self.assertTrue(first_query.wait(5))
+                    second = pool.submit(approve_second, dirs[1])
+                    self.assertTrue(second_started.wait(5))
+                    self.assertFalse(second_query.wait(0.2))
+                finally:
+                    release_query.set()
+                results = [job.result(5)["accion_propuesta"]["boards_resultado"] for job in (first, second)]
+        self.assertEqual(len(created), 1)
+        self.assertEqual([(r["operacion"], r["work_item_id"]) for r in results], [("creada", 7), ("actualizada", 7)])
 
 
 if __name__ == "__main__":

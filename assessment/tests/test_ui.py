@@ -56,8 +56,15 @@ class DemoHTTP(unittest.TestCase):
                     self.assertEqual(request("GET", f"/informes/{run_id}/informe.json")[0], 200)
                     self.assertEqual(request("GET", f"/informes/{run_id}/dotnet-test.log")[0], 200)
                     self.assertEqual(request("GET", f"/informes/{run_id}/checkpoint_aprobacion.json")[0], 200)
+                    self.assertEqual(request("GET", "/api/ecosistema")[0], 200)
                     self.assertEqual(request("GET", "/.env")[0], 404)
                     assess.assert_awaited_once()
+
+                with patch("assessment.ui.start_sandbox", return_value={"activo": True, "version": "v2", "url": "http://127.0.0.1:5080"}):
+                    self.assertEqual(request("POST", "/api/sandbox", '{"accion":"iniciar","version":"v9"}', origin)[0], 400)
+                    st_sb, body_sb = request("POST", "/api/sandbox", '{"accion":"iniciar","version":"v2"}', origin)
+                    self.assertEqual(st_sb, 200)
+                    self.assertIn("evaluador=", json.loads(body_sb)["sandbox"]["url_interoperable"])
 
                 with (patch("assessment.ui.OUTPUT", root),
                       patch("assessment.ui.apply_decision", return_value={

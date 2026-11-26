@@ -1,5 +1,8 @@
-# AppContratos
-Requiere .NET SDK 10. Cada carpeta v1, v2 o v3 es un proyecto autónomo con su propia cartera local. Desde la carpeta de la versión elegida:
+# NextGen DevSecOps Assessment
+
+Plataforma de evaluación continua y gobernanza DevSecOps construida con **Microsoft Agent Framework (MAF)**, **Azure AI Foundry**, **Azure Boards**, **GitHub Advanced Security (CodeQL + Dependabot)**, **Azure Container Apps**, **Microsoft Defender for Cloud** y **Application Insights**.
+
+Incluye tres versiones autónomas del servicio sujeto de prueba en .NET SDK 10 (`v1`, `v2` y `v3`), cada una con su propia cartera local. Desde la carpeta de la versión elegida:
 ```sh
 dotnet run --project src/Contratos --urls http://localhost:5080
 ```
@@ -16,12 +19,14 @@ dotnet test tests/Contratos.Tests --logger "trx;LogFileName=resultados.trx" --re
 
 Cada versión incluye un workflow de GitHub Actions para usarla como raíz de un repositorio. Conserva el TRX incluso si fallan pruebas. La app es local, de un solo proceso, con persistencia JSON y sin credenciales externas. Los tres proyectos son las entradas de la demo de evaluación en `assessment/`.
 
+El workflow de la raíz valida las tres versiones y guarda el TRX y el log. En `v2` exige que el único fallo sea la aserción de REN-001. La publicación en GHCR requiere que pase la matriz completa y está disponible para `v1` y `v3`.
+
 ## Demo local de evaluación
 
 Los comandos se ejecutan desde la raíz del ZIP extraído. Esta demo se verificó en macOS con .NET SDK 10.0.404, Python 3.14.7, xUnit 2.9.3 y el adaptador VSTest de xUnit 3.0.2. Si faltan los SDK, una opción en macOS con Homebrew es ejecutar `brew install python@3.14` y `brew install --cask dotnet-sdk`, y comprobar que `dotnet --list-sdks` incluya 10.0.x.
 
 ```sh
-cd /Users/johnbenjamincastrosanabria/Developer/AppContratos
+# Desde la raíz del repositorio (nextgen-devsecops-assessment)
 dotnet --list-sdks
 python3.14 -m venv assessment/.venv
 assessment/.venv/bin/python -m pip install -r assessment/requirements.txt
@@ -97,4 +102,4 @@ Cuando una versión queda en `INCUMPLIDO` o `EVIDENCIA_INSUFICIENTE`, el evaluad
 assessment/.venv/bin/python -m assessment aprobar --ejecucion <id_ejecucion> --motivo "Aprobado en revisión de entrega"
 assessment/.venv/bin/python -m assessment descartar --ejecucion <id_ejecucion> --motivo "Se cubrirá en el siguiente sprint"
 ```
-Si volvés a evaluar y aprobar la misma brecha, el ejecutor detecta el tag `devsecops-fp-<hash>` mediante WIQL y **actualiza el Work Item existente en Azure Boards en lugar de duplicarlo**.
+Si volvés a evaluar y aprobar la misma brecha, el ejecutor busca el tag `devsecops-fp-<hash>` mediante WIQL y actualiza la tarea abierta que encuentre. Las aprobaciones desde la web y la CLI se serializan entre procesos de la misma cuenta del sistema, incluso con directorios de salida distintos. Repetir una decisión sobre la misma ejecución devuelve el resultado registrado.

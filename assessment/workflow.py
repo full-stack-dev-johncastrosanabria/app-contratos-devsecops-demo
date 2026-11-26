@@ -1,10 +1,12 @@
 """Workflow MAF con ramas paralelas (QA + SecOps), política determinista y aprobación humana."""
 import asyncio
+from contextlib import closing
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import sqlite3
 from typing import Literal
 
 from agent_framework import Executor, FileCheckpointStorage, WorkflowBuilder, WorkflowContext, handler, tool
@@ -25,6 +27,7 @@ from .policy import SourceTest, evaluate, source_tests, validate_references
 AZURE_KEYS = ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_CHAT_COMPLETION_MODEL", "AZURE_OPENAI_API_KEY")
 ANTHROPIC_KEYS = ("ANTHROPIC_CHAT_MODEL", "ANTHROPIC_API_KEY")
 PROVIDER_KEYS = {"azure": AZURE_KEYS, "anthropic": ANTHROPIC_KEYS}
+APPROVAL_LOCK = Path.home() / ".appcontratos" / "approvals.sqlite3"
 
 
 class Reference(BaseModel):
@@ -345,87 +348,188 @@ def build_eight_stages(report: dict, devsecops_data: dict) -> list[dict]:
     tel = az.get("telemetria") or {}
     verdict = report["veredicto"]
     action = report.get("accion_propuesta")
+    execution = report["ejecucion"]
+    version, commit = execution["version"], execution.get("commit")
+    deployed_version, deployed_commit = desp.get("version_app"), desp.get("commit_desplegado")
+    deployment_matches = bool(
+        desp.get("estado") == "Succeeded" and desp.get("revision_activa")
+        and version == deployed_version and commit and commit == deployed_commit
+        and execution.get("cambios_locales") is False
+    )
+    deployment_summary = desp.get("motivo") or "Pendiente de identificar la revisión activa."
+    if desp.get("revision_activa"):
+        deployment_summary = f"{desp['recurso']} · revisión {desp['revision_activa']}"
+        if not deployment_matches:
+            deployment_summary += " · falta confirmar la correspondencia con la evaluación."
 
     return [
         {
             "numero": 1,
+            "bloque": "DevSec",
             "etapa": "Planificar",
             "herramienta": "Azure Boards",
+            "pregunta": "¿Qué debía resolver esta versión y cómo se aceptaría?",
             "estado": "verificado" if boards.get("disponible") else "pendiente",
             "resumen": f"{boards.get('referencia', 'AB#1')} · {boards.get('titulo', 'Sin conexión')}" if boards.get("disponible") else boards.get("motivo", "No disponible"),
+            "descripcion": (
+                boards.get("criterios_aceptacion")
+                or "Verifica que el requisito funcional y sus criterios de aceptación estén formalizados en el backlog."
+            ),
+            "datos": {
+                "Work Item": boards.get("referencia", "No disponible"),
+                "Estado en Boards": boards.get("estado", "Desconocido"),
+                "Etiquetas": boards.get("tags") or "REN-001",
+                "Criterio auditado": f"{report['criterio']['id']} · {report['criterio']['texto']}",
+            },
             "url": boards.get("url"),
+            "etiqueta_url": f"Abrir {boards.get('referencia', 'AB#1')} en Azure Boards",
         },
         {
             "numero": 2,
+            "bloque": "DevSec",
             "etapa": "Crear código",
             "herramienta": "GitHub PR",
+            "pregunta": "¿Qué cambio implementó la historia y quién lo integró?",
             "estado": "verificado" if pr else "pendiente",
             "resumen": f"PR #{pr['numero']} ({pr['estado']}) · {', '.join(pr.get('referencias_boards') or ['sin AB#'])}" if pr else "Sin PR vinculado",
+            "descripcion": "Rastrea la trazabilidad desde el commit evaluado hacia el Pull Request revisado y su vínculo AB# con Azure Boards.",
+            "datos": {
+                "Repositorio": gh.get("repositorio", "Local"),
+                "Pull Request": f"#{pr['numero']} · {pr.get('titulo', '')}" if pr else "No detectado",
+                "Autor / Estado": f"{pr.get('autor', '-')} · {pr.get('estado', '-')}" if pr else "-",
+                "Commit evaluado": (report["ejecucion"].get("commit") or "local")[:12],
+            },
             "url": pr.get("url") or gh.get("url_repositorio"),
+            "etiqueta_url": "Inspeccionar Pull Request en GitHub",
         },
         {
             "numero": 3,
+            "bloque": "DevSec",
             "etapa": "Asegurar desde el origen",
             "herramienta": "CodeQL + Dependabot",
+            "pregunta": "¿Qué controles de seguridad estática y dependencias se ejecutaron sobre el cambio?",
             "estado": "verificado" if sec.get("alertas_abiertas", 0) == 0 and sec.get("estado") == "activo" else "informativo",
             "resumen": (
                 f"CodeQL activo ({sec.get('alertas_abiertas', 0)} alertas abiertas) · Dependabot activo"
                 if sec.get("estado") == "activo"
                 else f"Dependabot activo · CodeQL ({sec.get('estado', 'en curso')})"
             ),
+            "descripcion": "Inspecciona análisis SAST (CodeQL) y vigilancia de cadena de suministro (Dependabot) asociados al código fuente.",
+            "datos": {
+                "Estado CodeQL": sec.get("estado", "no disponible"),
+                "Alertas SAST abiertas": str(sec.get("alertas_abiertas", 0)),
+                "Dependabot": "Configurado (.github/dependabot.yml)",
+                "Alcance": "Versión / Código fuente",
+            },
             "url": f"{gh['url_repositorio']}/security" if gh.get("url_repositorio") else None,
+            "etiqueta_url": "Abrir alertas de seguridad en GitHub",
         },
         {
             "numero": 4,
+            "bloque": "DevSec",
             "etapa": "Integrar y probar",
             "herramienta": "GitHub Actions + xUnit TRX",
+            "pregunta": "¿Qué pruebas pasaron y cuáles respaldan explícitamente el criterio de aceptación?",
             "estado": {"VERIFICADO": "verificado", "INCUMPLIDO": "incumplido", "EVIDENCIA_INSUFICIENTE": "pendiente"}[verdict],
             "resumen": f"{verdict} · {len(report['resultados_trx'])} pruebas ejecutadas en TRX",
+            "descripcion": report["justificacion"],
+            "datos": {
+                "Veredicto determinista": verdict,
+                "Política aplicada": report.get("politica_version", POLICY_VERSION),
+                "Casos en TRX": str(len(report["resultados_trx"])),
+                "Pruebas vinculadas a REN-001": str(len(report["referencias"])),
+            },
             "url": ci.get("url"),
+            "etiqueta_url": "Ver ejecución del pipeline en GitHub Actions",
         },
         {
             "numero": 5,
+            "bloque": "CloudOps",
             "etapa": "Desplegar",
             "herramienta": "Azure Container Apps",
-            "estado": "verificado" if desp.get("estado") == "Succeeded" else "pendiente",
-            "resumen": (
-                f"{desp.get('recurso')} · rev {desp.get('revision_activa')} ({desp.get('version_app') or 'cloud'})"
-                if desp.get("recurso") else desp.get("motivo", "Pendiente de despliegue")
-            ),
+            "pregunta": "¿Qué artefacto inmutable y revisión están desplegados en el ambiente cloud?",
+            "estado": "verificado" if deployment_matches else "pendiente",
+            "resumen": deployment_summary,
+            "descripcion": "Comprueba la revisión serverless en Azure Container Apps, su imagen OCI, etiquetas de trazabilidad y estado de ingreso.",
+            "datos": {
+                "Recurso Azure": desp.get("recurso") or "ca-appcontratos",
+                "Grupo de recursos": desp.get("grupo_recursos") or "rg-jcastros-2718",
+                "Revisión activa": desp.get("revision_activa") or "-",
+                "Versión desplegada": deployed_version or "-",
+                "Commit en contenedor": (deployed_commit or "-")[:12],
+                "Versión evaluada": version,
+                "Commit evaluado": (commit or "-")[:12],
+                "Cambios locales": {True: "Sí", False: "No"}.get(execution.get("cambios_locales"), "Desconocido"),
+                "Ingreso público": desp.get("url") or "Pausado en modo ahorro ($0.00/h)",
+            },
             "url": desp.get("url"),
+            "etiqueta_url": "Abrir AppContratos en Azure Container Apps",
         },
         {
             "numero": 6,
+            "bloque": "CloudOps",
             "etapa": "Operar",
             "herramienta": "Microsoft Defender for Cloud",
+            "pregunta": "¿Existen brechas de postura cloud o configuración que afecten al recurso?",
             "estado": "verificado" if not dfd.get("hallazgos") else "atencion",
             "resumen": (
-                f"HTTPS exclusivo: {'sí' if dfd.get('https_exclusivo_verificado') else 'no'} · "
+                f"HTTPS exclusivo: {'sí' if dfd.get('https_exclusivo_verificado') else 'pausado'} · "
                 f"{len(dfd.get('hallazgos') or [])} observación(es) de postura"
             ),
+            "descripcion": "Evalúa controles Foundational CSPM en Azure Resource Graph y endurecimiento TLS / identidad administrada del recurso.",
+            "datos": {
+                "HTTPS exclusivo": "Sí" if dfd.get("https_exclusivo_verificado") else "Ingreso desactivado",
+                "Identidad administrada": desp.get("identidad_administrada") or "None",
+                "Evaluaciones RG": str(dfd.get("evaluaciones_totales_rg", 0)),
+                "Observaciones abiertas": str(len(dfd.get("hallazgos") or [])),
+            },
             "url": None,
+            "etiqueta_url": None,
         },
         {
             "numero": 7,
+            "bloque": "CloudOps",
             "etapa": "Observar y aprender",
             "herramienta": "Application Insights",
+            "pregunta": "¿Cambió la tasa de errores 5xx o la latencia después del despliegue?",
             "estado": "verificado" if tel.get("disponible") and tel.get("fallos_5xx", 0) == 0 else "informativo",
             "resumen": (
                 f"{tel['total_solicitudes']} req ({tel['tasa_error_pct']}% 5xx · {tel['latencia_promedio_ms']} ms prom.)"
                 if tel.get("disponible") else tel.get("motivo", "Ingesta inicial en progreso")
             ),
+            "descripcion": "Consulta la tabla AppRequests en Log Analytics (KQL) para verificar estabilidad operativa y tiempos de respuesta.",
+            "datos": {
+                "Ventana KQL": tel.get("ventana", "últimas 24h"),
+                "Solicitudes totales": str(tel.get("total_solicitudes", 0)),
+                "Errores servidor (5xx)": f"{tel.get('fallos_5xx', 0)} ({tel.get('tasa_error_pct', 0.0)}%)",
+                "Latencia promedio": f"{tel.get('latencia_promedio_ms', 0.0)} ms",
+            },
             "url": None,
+            "etiqueta_url": None,
         },
         {
             "numero": 8,
+            "bloque": "CloudOps",
             "etapa": "Optimizar con IA",
             "herramienta": "Azure AI Foundry + Boards",
+            "pregunta": "¿Qué mejora concreta proponemos y cómo garantizamos seguimiento sin duplicados?",
             "estado": "verificado" if verdict == "VERIFICADO" else "atencion",
             "resumen": (
                 "Sin brechas abiertas para REN-001."
                 if not action else f"Acción lista ({action['tag_idempotencia']}) · esperando aprobación humana"
             ),
+            "descripcion": (
+                "Todos los controles funcionales de REN-001 se encuentran verificados."
+                if not action else f"{action['titulo']} — {action['criterio_reevaluacion']}"
+            ),
+            "datos": {
+                "Estado gobernanza": action["estado"] if action else "CUMPLIDO",
+                "Clave idempotencia": action["tag_idempotencia"] if action else "N/A",
+                "Historia padre": f"AB#{action.get('historia_padre', 1)}" if action else "AB#1",
+                "Reevaluación": action["criterio_reevaluacion"] if action else "No requerida",
+            },
             "url": boards.get("url"),
+            "etiqueta_url": "Abrir tablero en Azure Boards",
         },
     ]
 
@@ -483,7 +587,19 @@ class PrepareFollowUp(Executor):
         ctx.set_state("pending_boards_action", checkpoint_meta)
 
 
+class DecisionAlreadyResolved(ValueError):
+    pass
+
+
 def resolve_human_decision(run_directory: Path, approve: bool, note: str = "") -> dict:
+    APPROVAL_LOCK.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # shortcut: serializa procesos de esta cuenta, usar coordinación compartida si se ejecuta en varios hosts.
+    with closing(sqlite3.connect(APPROVAL_LOCK, timeout=60)) as lock:
+        lock.execute("BEGIN IMMEDIATE")
+        return _resolve_human_decision(run_directory, approve, note)
+
+
+def _resolve_human_decision(run_directory: Path, approve: bool, note: str) -> dict:
     report_path = run_directory / "informe.json"
     if not report_path.is_file():
         raise FileNotFoundError(f"No existe informe.json en {run_directory}")
@@ -491,6 +607,12 @@ def resolve_human_decision(run_directory: Path, approve: bool, note: str = "") -
     action = report.get("accion_propuesta")
     if not action:
         raise ValueError("Esta ejecución no tiene una acción propuesta pendiente.")
+    desired_state = "APROBADA" if approve else "DESCARTADA"
+    if action["estado"] == desired_state:
+        _write_approval_checkpoint(run_directory, report)
+        return report
+    if action["estado"] != "PENDIENTE_APROBACION":
+        raise DecisionAlreadyResolved(f"La acción ya está en estado {action['estado']}.")
 
     now = datetime.now(timezone.utc).isoformat()
     if approve:
@@ -506,6 +628,9 @@ def resolve_human_decision(run_directory: Path, approve: bool, note: str = "") -
                 stage["estado"] = "verificado"
                 stage["resumen"] = f"Tarea {boards_result['operacion']} en Azure Boards ({boards_result['referencia']})"
                 stage["url"] = boards_result["url"]
+                stage["etiqueta_url"] = f"Abrir {boards_result['referencia']} en Azure Boards"
+                if isinstance(stage.get("datos"), dict):
+                    stage["datos"]["Estado gobernanza"] = f"APROBADA ({boards_result['referencia']} · {boards_result['operacion']})"
     else:
         action.update(
             estado="DESCARTADA",
@@ -516,13 +641,23 @@ def resolve_human_decision(run_directory: Path, approve: bool, note: str = "") -
             if stage.get("numero") == 8:
                 stage["estado"] = "informativo"
                 stage["resumen"] = f"Recomendación descartada: {action['nota_humana']}"
+                if isinstance(stage.get("datos"), dict):
+                    stage["datos"]["Estado gobernanza"] = "DESCARTADA"
 
-    (run_directory / "checkpoint_aprobacion.json").write_text(
-        json.dumps({"ejecucion_id": report["ejecucion"]["id"], "accion": action}, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _write_decision_json(report_path, report)
+    _write_approval_checkpoint(run_directory, report)
     return report
+
+
+def _write_decision_json(path: Path, data: dict) -> None:
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def _write_approval_checkpoint(run_directory: Path, report: dict) -> None:
+    _write_decision_json(run_directory / "checkpoint_aprobacion.json",
+                         {"ejecucion_id": report["ejecucion"]["id"], "accion": report["accion_propuesta"]})
 
 
 async def run(request: Request) -> dict:
@@ -565,9 +700,5 @@ async def run(request: Request) -> dict:
     if "accion_propuesta" in report:
         ckpt_file = request.output.resolve() / report["ejecucion"]["id"] / "checkpoint_aprobacion.json"
         if ckpt_file.parent.is_dir():
-            ckpt_file.write_text(
-                json.dumps({"ejecucion_id": report["ejecucion"]["id"], "accion": report["accion_propuesta"]},
-                           ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
+            _write_approval_checkpoint(ckpt_file.parent, report)
     return report

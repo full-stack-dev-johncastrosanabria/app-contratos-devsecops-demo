@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from .integrations import load_settings
-from .workflow import Request, resolve_human_decision, run
+from .workflow import DecisionAlreadyResolved, Request, resolve_human_decision, run
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -145,7 +145,10 @@ def main() -> int:
     if args.proyecto in ("aprobar", "descartar"):
         if not args.ejecucion:
             parser.error("Indicá --ejecucion <id> para aprobar o descartar una acción.")
-        updated = apply_decision(args.salida.resolve() / args.ejecucion, args.proyecto == "aprobar", args.motivo)
+        try:
+            updated = apply_decision(args.salida.resolve() / args.ejecucion, args.proyecto == "aprobar", args.motivo)
+        except DecisionAlreadyResolved as exc:
+            parser.error(str(exc))
         act = updated["accion_propuesta"]
         res = act.get("boards_resultado") or {}
         print(f"{args.ejecucion} · {act['estado']} · {res.get('referencia', act['tag_idempotencia'])} {res.get('url', '')}".strip())
