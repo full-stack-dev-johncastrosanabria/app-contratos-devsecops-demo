@@ -86,4 +86,4 @@ Fragmento generado al evaluar v2 en modo solo evidencia.
 | v3 | Observado · `EVIDENCIA_INSUFICIENTE` | Pasaron tres casos de contratos activos. Falta el caso vinculado de cancelación. |
 | Investigación MAF | Observado con HTTP simulado | MAF ejecutó las herramientas en Azure OpenAI y Anthropic simulados y el evaluador comprobó las referencias. |
 | Anthropic Claude real | Observado · `COMPLETADA` | Claude Sonnet 4.6 ejecutó las herramientas sobre `v1`, `v2` y `v3` con salidas estructuradas validadas. |
-| Azure OpenAI real | Soportado por configuración | Conector oficial validado en pruebas; activar con `ASSESSMENT_PROVIDER=azure` y credenciales en `.env`. |
+| Azure OpenAI real | Observado · `COMPLETADA` | `gpt-4.1-mini` (`GlobalStandard`) ejecutó las herramientas sobre `v1`, `v2` y `v3` con referencias validadas. |

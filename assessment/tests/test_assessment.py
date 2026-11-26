@@ -199,8 +199,8 @@ class DotnetIntegration(unittest.TestCase):
         output_format = requests[0]["output_config"]["format"]
         self.assertEqual(output_format["type"], "json_schema")
         prompt_text = json.dumps(requests[0]["messages"], ensure_ascii=False)
-        self.assertIn("Carpeta de captura local", prompt_text)
-        self.assertIn("execution_id individual", prompt_text)
+        self.assertNotIn(evidence.identity["id"], prompt_text)
+        self.assertIn("listar_resultados", json.dumps(requests[0].get("system", ""), ensure_ascii=False))
         schema = output_format["schema"]
         self.assertIs(schema["additionalProperties"], False)
         self.assertIs(schema["$defs"]["Reference"]["additionalProperties"], False)
