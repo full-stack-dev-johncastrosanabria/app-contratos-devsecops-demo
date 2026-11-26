@@ -1,0 +1,23 @@
+<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Contratos · Renovaciones</title>
+<style>*{box-sizing:border-box}body{font:16px/1.5 system-ui;color:#162d37;background:#f2f6f5;margin:0}main{max-width:1000px;margin:auto;padding:32px 18px}h1{font-size:2.8rem;margin:0;color:#123c42}section{background:white;padding:22px;border-radius:12px;margin:18px 0}form,.fila{display:flex;align-items:end;gap:12px;flex-wrap:wrap}label{display:grid;gap:4px}input,button{font:inherit;border:1px solid #73918e;border-radius:6px;padding:7px}button{cursor:pointer;color:white;background:#12655c}.fila{align-items:center;border-top:1px solid #ddd;padding:10px 0}.fila span{flex:1;min-width:170px}h2{margin-top:0;font-size:1.3rem}</style>
+<main><h1>Contratos</h1><section><h2>Registrar contrato</h2><form id="alta"><label>Número<input name="numero" required></label><label>Cliente<input name="cliente" required></label><label>Correo del responsable<input name="correo" type="email" required></label><label>Renovación<input name="renovacion" type="date" required></label><button>Guardar</button></form></section><section><h2>Cartera</h2><div id="lista"></div></section><section><h2>Evaluar renovaciones</h2><p>Genera avisos locales a 30, 7 y 1 día del vencimiento.</p><form id="evaluar"><label>Fecha de evaluación<input id="fecha" type="date" required></label><button>Evaluar</button></form><h3>Bandeja de avisos simulados</h3><div id="avisos"></div></section><p role="status" id="estado"></p></main><script>
+const $ = id => document.getElementById(id);
+const hoy = new Date();
+$('fecha').value = new Date(hoy.getTime()-hoy.getTimezoneOffset()*60000).toISOString().slice(0,10);
+async function cargar(){
+ const res=await fetch('/api/contratos'); if(!res.ok) throw Error('No se pudo cargar la cartera.');
+ const datos=await res.json(); $('lista').textContent=datos.contratos.length?'':'Todavía no hay contratos.';
+ for(const c of datos.contratos){
+  const fila=document.createElement('div');fila.className='fila';
+  const texto=document.createElement('span');texto.textContent=[c.numero,c.cliente,c.renovacion,c.cancelado?'Cancelado':'Activo'].join(' · ');fila.append(texto);
+  if(!c.cancelado){const btn=document.createElement('button');btn.textContent='Cancelar contrato';btn.onclick=()=>{if(confirm('¿Cancelar el contrato '+c.numero+'?')) enviar('/api/contratos/'+c.id+'/cancelar')};fila.append(btn)}
+  $('lista').append(fila);
+ }
+ $('avisos').textContent=datos.avisos.length?'':'Sin avisos.';
+ for(const a of datos.avisos){const p=document.createElement('p');p.textContent=[datos.contratos.find(c=>c.id===a.contratoId)?.numero,a.destinatario,a.dias+' días',a.renovacion].join(' · ');$('avisos').append(p)}
+}
+async function enviar(url,body){try{const r=await fetch(url,{method:'POST',headers:body?{'Content-Type':'application/json'}:{},body:body&&JSON.stringify(body)});if(!r.ok) throw Error(await r.text()||'Error al guardar');await cargar();$('estado').textContent='Operación completada.';return true}catch(e){$('estado').textContent=e.message;return false}}
+$('alta').onsubmit=async e=>{e.preventDefault();if(await enviar('/api/contratos',Object.fromEntries(new FormData($('alta'))))) $('alta').reset()};
+$('evaluar').onsubmit=e=>{e.preventDefault();enviar('/api/evaluar?fecha='+$('fecha').value)};
+cargar().catch(e=>$('estado').textContent=e.message);
+</script></html>

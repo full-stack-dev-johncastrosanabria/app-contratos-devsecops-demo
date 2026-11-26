@@ -1,0 +1,19 @@
+# Entorno y artefactos del evaluador
+assessment/.env
+assessment/.venv/
+assessment/runs/
+**/__pycache__/
+*.py[cod]
+
+# Artefactos de compilación y datos locales .NET
+**/bin/
+**/obj/
+**/TestResults/
+**/evidencia/
+**/datos.json*
+
+# Herramientas locales y sistema operativo
+.playwright-mcp/
+.serena/
+.codebase-memory/
+.DS_Store
