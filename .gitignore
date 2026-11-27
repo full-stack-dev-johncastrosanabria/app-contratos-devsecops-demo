@@ -18,3 +18,7 @@ assessment/runs/
 .serena/
 .codebase-memory/
 .DS_Store
+
+# Demo automatizada: caché de voz y registros de tiempo
+demo/.voz/
+demo/.registro/
