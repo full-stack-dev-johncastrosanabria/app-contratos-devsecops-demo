@@ -50,7 +50,10 @@ El usuario presenta la consola **NextGen DevSecOps Assessment** en vivo, compart
 ## 5. Decisiones tomadas
 
 Decidió el usuario el 27 nov 2026:
-- **Motor: agentes MAF en las tres entregas**, con un solo clic en «Ejecutar». Si un agente falla, la demo pulsa «Reintentar vN con Solo evidencia · 0 tokens», un botón que la consola ya ofrece.
+- **Motor: agentes MAF en las tres entregas**, con un solo clic en «Ejecutar». El producto ya absorbe los fallos de un agente:
+  - Cada agente tiene un tope de 90 s (`workflow.py`).
+  - Ante un 429, un 401 o ese tope, responde HTTP 200 con `ERROR_AGENTE` y el mismo veredicto determinista. La demo sigue con esa tarjeta degradada.
+  - El botón «Reintentar vN con Solo evidencia · 0 tokens» solo aparece si `/api/evaluar` falla a nivel HTTP. En ese caso, la demo lo pulsa.
 - **Aprobación: la pulsa siempre Playwright.** La narración aclara que en la operación real ese clic lo da una persona.
 - **Boards: las tareas de demo van a la papelera al reiniciar** (`DELETE`, recuperable). Si no hay permiso, se recurre a `Removed`, como hoy.
 - **Voz: Dalia multilingüe.**
@@ -67,6 +70,10 @@ Decisiones mías (las puedes corregir):
 - **Parche C#** con «Plantilla de contingencia · 0 tokens», no con el borrador de IA.
 - **Mitigación SEC-DOCKER-001** sin pulsar «Investigar con Agente SecOps (Foundry)». Ninguna escena depende de texto generado en vivo, salvo la evaluación MAF.
 - **Power BI**: se enfoca el botón y los KPI sin abrirlo, porque abrirlo pide login. Queda para las preguntas.
+- **Reevaluación tras el parche (escena 12) con «Solo evidencia»**, no con agentes. Antes de aplicar el parche, se cambia `#mode-select` a la vista del público y se narra: «verificar el parche no necesita IA». Evita una cuarta corrida MAF y su riesgo de 429, y tarda ~25 s en vez de 30–65 s.
+- **Se cierra el ciclo en Boards**: cuando v3 queda Verificado, se pulsa «Cerrar AB#n en Azure Boards». El KPI «Ciclo Azure Boards» de la escena 13 lo refleja, y la pantalla de preguntas no queda con una acción pendiente. El reinicio también envía esa tarea a la papelera.
+- **La ventana de 8–12 min se cumple en cada corrida**, no solo en las de aceptación. Las tres evaluaciones MAF varían entre ~150 y ~210 s, y con un texto fijo no cabe en ambos extremos. Por eso hay líneas `opcional: true`: se omiten si el total proyectado pasaría de 11,5 min (§6.4).
+- **Si la evaluación sigue en curso al llegar al tope**: no se cancela, porque cancelar desde el navegador no detiene el servidor y `EVAL_LOCK` dejaría en cola cualquier reintento. El director se pausa solo y muestra un aviso al presentador: «La evaluación sigue en curso · Siguiente para continuar · Terminar».
 
 ## 6. Diseño
 
@@ -137,7 +144,14 @@ Una escena tiene `id`, `titulo` y `pasos`. Tipos de paso:
 | `clic` | `selector`, `confirmar?` (doble pulsación), `voz?` | Mueve el cursor y hace clic. |
 | `elegir` | `selector`, `valor` | Elige una opción de un `<select>`. |
 | `escribir` | `selector`, `texto` | Teclea de forma visible. |
-| `esperar` | `condicion` (expresión JS), `max_s`, `voz_mientras: [...]`, `relleno: [...]`, `si_falla` | Narra `voz_mientras` mientras espera la condición. Si la condición sigue pendiente, encadena líneas de `relleno`. Termina cuando la condición se cumple y acaba la línea en curso. Si se agota el tiempo, ejecuta `si_falla`, por ejemplo pulsar los reintentos «Solo evidencia». |
+| `esperar` | `condicion` (expresión JS), `max_s`, `voz_mientras: [...]`, `relleno: [...]`, `si_error` | Narra `voz_mientras` mientras espera la condición. Si la condición sigue pendiente, encadena líneas de `relleno`. Termina cuando la condición se cumple y acaba la línea en curso. Si aparece un error HTTP en una tarjeta, ejecuta `si_error`: pulsar «Reintentar vN con Solo evidencia» y seguir esperando. Al llegar a `max_s`, se pausa solo (§5). |
+
+**Líneas opcionales.** Un paso `narrar` con `opcional: true` solo se reproduce si el total proyectado, sumando esa línea, no pasa de 11,5 min. El total proyectado se calcula así:
+- tiempo transcurrido sin pausas;
+- más la narración obligatoria restante dividida por la velocidad;
+- más las esperas reales restantes, con valores nominales hasta que se miden en la propia corrida.
+
+A 1,25× suenan todas; a 0,75× se omiten las necesarias. Así la ventana se cumple en cada corrida.
 
 ### 6.5 Escenas y presupuesto (narración a 1×)
 
@@ -148,20 +162,25 @@ Una escena tiene `id`, `titulo` y `pasos`. Tipos de paso:
 | 3 | La consola | Foco en la marca, en las píldoras del ecosistema y en los controles | 25 s |
 | 4 | El caso | Slide `caso`: AppContratos, REN-001 y REN-002, y las tres entregas, cada una con su «Escenario:» | 35 s |
 | 5 | Ejecutar | `#scope-select` = todas, `#mode-select` = agente, `#run-btn` con doble pulsación | 8 s |
-| 6 | Mientras corre | Slide `maf` (recolector SHA-256, tres agentes en paralelo y fan-in a la política REN-001.v2), luego foco en la matriz que se llena en vivo. Espera hasta que `#ledger[data-running="false"]` y las tres tarjetas tengan dictamen, con máximo de 300 s | 80 s + relleno |
+| 6 | Mientras corre | Slide `maf` (recolector SHA-256, tres agentes en paralelo y fan-in a la política REN-001.v2), luego foco en la matriz que se llena en vivo. Una línea fija y neutra: «si un agente no responde a tiempo, la consola lo registra como diagnóstico operativo y el dictamen no cambia: lo decide la política». Espera hasta que `#ledger[data-running="false"]` y las tres tarjetas tengan dictamen, con máximo de 420 s; luego se pausa solo | 80 s + relleno |
 | 7 | Dictamen | Lupa sobre la fila de dictámenes (v1 verde, v2 rojo, v3 ámbar) y luego «Solo brechas» (`#filter-diff-btn`) | 30 s |
 | 8 | Momento clave v3 | Inspector de la Etapa 4 de v3 (`.ledger-cell-btn[data-stage="4"][data-ver="v3"]`): pruebas en verde y ninguna vinculada a REN-001 ni con un contrato cancelado | 40 s |
 | 9 | Las 8 etapas | Slide `etapas`, luego un recorrido por el inspector con `#inspector-next-btn` (~7 s por etapa) | 70 s |
 | 10 | Seguridad en origen | Reporte de la Etapa 3 y lupa sobre SEC-DOCKER-001 (Trivy DS002 HIGH). Pasos: «Corregir en Etapa 8 →» y «Aplicar mitigación y reauditar Etapa 3», que bajan Trivy HIGH a 0 | 35 s |
 | 11 | Gobernanza | Slide `gobernanza`, luego la pestaña v3 del expediente. Pasos: escribir la nota, «Aprobar en Azure Boards» y confirmar. Lupa sobre el enlace `AB#n`. Frase neutra: «la aprobación queda registrada en Azure Boards» | 35 s |
-| 12 | Remediación | «Plantilla de contingencia · 0 tokens» y «Aplicar en local y reevaluar» con doble pulsación. Espera a que v3 pase a Verificado (~25 s) y foco en la columna v3 ya en verde | 30 s |
+| 12 | Remediación | «Plantilla de contingencia · 0 tokens». Luego `#mode-select` a «Solo evidencia», narrado, y «Aplicar en local y reevaluar» con doble pulsación. Espera a que v3 pase a Verificado (~25 s), foco en la columna v3 ya en verde y, al final, «Cerrar AB#n en Azure Boards» | 35 s |
 | 13 | Valor continuo | Foco en `#value-kpis` y en el botón de Power BI, sin abrirlo | 15 s |
 | 14 | Cierre | Slide `cierre`: las 3 tesis y el siguiente paso («una aplicación crítica, sus dos últimas entregas, dos semanas») | 30 s |
 
-- **Total de narración**: ~8,3 min a 1×, unos 8.500 caracteres, porque Dalia lee ~17 caracteres por segundo.
-- **Total estimado** contando las esperas reales: ~9,5 min a 1×, ~11,7 min a 0,75× y ~8,2 min a 1,25×.
+- **Presupuesto de narración a 1×** (Dalia lee ~17 caracteres por segundo):
+  - ~5,7 min obligatorios, unos 5.800 caracteres;
+  - ~1,2 min de líneas `opcional`;
+  - en la escena 6, 80 s obligatorios más relleno.
+- **Modelo de tiempo**: el total es la narración dividida por la velocidad más, en cada escena con espera real, el mayor entre esa espera y la narración que la cubre. Las esperas son la evaluación MAF (150–210 s), la reauditoría de Trivy, la aprobación, la reevaluación (~25 s) y el cierre en Boards.
+- **Extremos que debe cumplir**:
+  - 1,25× con 150 s de evaluación y todas las opcionales: ≥ 8 min;
+  - 0,75× con 210 s y sin opcionales: ≤ 12 min.
 - **Esto es una estimación**: la aceptación se mide (§6.10).
-- **Si la medición se sale de la ventana**: se ajusta el texto, nunca la lógica.
 - **Fuente del contenido**: los textos parten de los actos de `GUION_DEMO.md`, con tono consultivo y tratando a la audiencia de «ustedes».
 
 ### 6.6 Voz
@@ -206,7 +225,7 @@ Una escena tiene `id`, `titulo` y `pasos`. Tipos de paso:
 
 - **`assessment/tests/test_demo.py`** (`unittest`, como las pruebas existentes) comprueba:
   - que `guion.yaml` es válido: tipos de paso conocidos, campos obligatorios y voz no vacía;
-  - que el modelo de tiempo da totales dentro de 8–12 min a las tres velocidades, con esperas reales nominales;
+  - que el modelo de tiempo da totales dentro de 8–12 min en los dos extremos de §6.5, aplicando las reglas de líneas opcionales;
   - el `DELETE` con fallback en Boards.
 - **`--ensayo`** recorre toda la coreografía rápido para validar los selectores de punta a punta:
   - motor `solo-evidencia`;
@@ -225,7 +244,7 @@ Una escena tiene `id`, `titulo` y `pasos`. Tipos de paso:
 
 ## 8. Riesgos
 
-- **Latencia o 429 de Foundry en la escena 6.** Mitigaciones: el ping previo, el `relleno` y el reintento «Solo evidencia». Como el veredicto lo decide la política, la historia no cambia.
-- **Ventana de tiempo ajustada en los extremos** (~8,2 min a 1,25× y ~11,7 min a 0,75×). Se mide y se ajusta el texto.
+- **Latencia o 429 de Foundry en la escena 6.** El producto lo absorbe con `ERROR_AGENTE` y el mismo veredicto. Se suman el ping previo, el `relleno`, el reintento ante un error HTTP y la pausa automática al llegar al tope.
+- **Ventana de tiempo ajustada en los extremos.** Las líneas opcionales la protegen en cada corrida, y la aceptación la mide.
 - **Cambios en el DOM de la consola rompen selectores.** `--ensayo` los detecta antes de presentar.
 - **Permiso de borrado en Boards sin verificar.** Si no lo hay, se recurre a `Removed`, que no es peor que hoy.
