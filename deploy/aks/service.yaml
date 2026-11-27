@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: appcontratos-svc
+  namespace: contratos-prod
+  labels:
+    app.kubernetes.io/name: appcontratos
+    app.kubernetes.io/part-of: nextgen-devsecops-assessment
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: appcontratos
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

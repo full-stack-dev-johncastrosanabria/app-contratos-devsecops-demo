@@ -1,0 +1,30 @@
+Descriptor:
+  Name: NextGenDevSecOpsAssessment
+  DisplayName: NextGen DevSecOps Assessment (REN-001.v2)
+  Description: >-
+    Habilidad personalizada para Microsoft Security Copilot que consulta dictámenes deterministas xUnit/TRX,
+    alertas SAST/SBOM en GitHub, postura CSPM en Microsoft Defender for Cloud y seguimiento idempotente en Azure Boards.
+  SupportedAuthTypes:
+    - None
+
+SkillGroups:
+  - Format: API
+    Settings:
+      OpenApiSpecUrl: http://127.0.0.1:8050/copilot/openapi.yaml
+    Skills:
+      - Name: consultarEstadoEcosistema
+        DisplayName: Consultar dictámenes y estado de las 8 etapas DevSecOps
+        Description: Recupera el último veredicto determinista (v1, v2, v3), hallazgos SecOps y enlaces de trazabilidad.
+        ExamplePrompts:
+          - "¿Cuál es el estado actual de cumplimiento REN-001 en las tres entregas de AppContratos?"
+          - "¿Qué brechas de seguridad o pruebas faltan antes de promover a producción?"
+      - Name: consultarMetricasContinuas
+        DisplayName: Consultar KPIs históricos de gobernanza y evidencia
+        Description: Obtiene el porcentaje de controles respaldados por evidencia verificable y el estado de acciones en Azure Boards.
+        ExamplePrompts:
+          - "Dame los indicadores de valor continuo y cobertura de evidencia de AppContratos."
+      - Name: generarBorradorRemediacion
+        DisplayName: Proponer remediación C# para brecha detectada
+        Description: Genera el caso de prueba xUnit o filtro de dominio sugerido para una ejecución con brecha abierta.
+        ExamplePrompts:
+          - "Generá el borrador de remediación para la última corrida incumplida."

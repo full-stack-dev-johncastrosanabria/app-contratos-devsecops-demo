@@ -15,9 +15,13 @@ import httpx2
 from anthropic import AsyncAnthropic
 from openai import AsyncAzureOpenAI
 
+from assessment.analytics import build_powerbi_metrics, render_powerbi_csv
 from assessment.ci import matches_expected
-from assessment.evidence import APP, CRITERION, PROJECT, collect
-from assessment.policy import evaluate, source_tests
+from assessment.demo_reset import execute_demo_reset, restore_latest_archive
+from assessment.evidence import APP, CRITERION, PROJECT, collect, read_cobertura
+from assessment.integrations import audit_repo_governance, parse_boards_criteria
+from assessment.policy import evaluate, evaluate_criteria_matrix, source_tests
+from assessment.remediation import generate_remediation
 from assessment.workflow import (
     AZURE_KEYS,
     AnthropicClient,
@@ -25,6 +29,8 @@ from assessment.workflow import (
     OpenAIChatCompletionClient,
     Request,
     build_eight_stages,
+    reopen_governance_decision,
+    resolve_boards_closure,
     resolve_human_decision,
     run,
 )
@@ -351,6 +357,136 @@ class DevSecOpsRegression(unittest.TestCase):
                 results = [job.result(5)["accion_propuesta"]["boards_resultado"] for job in (first, second)]
         self.assertEqual(len(created), 1)
         self.assertEqual([(r["operacion"], r["work_item_id"]) for r in results], [("creada", 7), ("actualizada", 7)])
+
+    def test_multi_criteria_cobertura_remediation_and_reversible_demo_cycle(self):
+        parsed_criteria = parse_boards_criteria(
+            "• REN-001: Al evaluar renovaciones, un contrato cancelado no debe generar un aviso.\n"
+            "• REN-002: Evaluaciones repetidas en activos generan un solo aviso.\n"
+            "• REN-003: Contratos vencidos no generan aviso."
+        )
+        self.assertEqual([c["id"] for c in parsed_criteria], ["REN-001", "REN-002", "REN-003"])
+
+        gov = audit_repo_governance(ROOT)
+        self.assertTrue(gov["copilot"]["configurado"])
+        self.assertTrue(gov["pipelines"]["azure_pipelines_definido"])
+        self.assertTrue(gov["aks"]["endurecido"])
+        self.assertEqual(gov["aks"]["controles_verificados"], 6)
+        self.assertTrue(gov["security_copilot"]["disponible"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            cov_xml = base / "coverage.cobertura.xml"
+            cov_xml.write_text(
+                '<coverage line-rate="0.925" branch-rate="0.85" lines-covered="37" lines-valid="40" '
+                'branches-covered="17" branches-valid="20"></coverage>',
+                encoding="utf-8",
+            )
+            cov = read_cobertura(base)
+            self.assertIsNotNone(cov)
+            self.assertEqual(cov["lineas_pct"], 92.5)
+
+            runs_dir = base / "runs"
+            run_id = "b" * 32
+            run_dir = runs_dir / run_id
+            run_dir.mkdir(parents=True)
+            sample_report = {
+                "politica_version": "REN-001.v2",
+                "criterio": CRITERION,
+                "veredicto": "INCUMPLIDO",
+                "justificacion": "Falló Assert.Empty.",
+                "siguiente_paso": "Corregir filtro.",
+                "referencias": [{"id": "tests/RenovacionesTests.cs:20", "metodo": "RenovacionesTests.CanceladoNoGeneraAviso"}],
+                "resultados_trx": [{"outcome": "Passed"}, {"outcome": "Failed"}],
+                "criterios_evaluados": [
+                    {"id": "REN-001", "rol": "primario", "veredicto": "INCUMPLIDO", "texto": CRITERION["texto"]},
+                    {"id": "REN-002", "rol": "secundario", "veredicto": "VERIFICADO", "texto": "Activos sin duplicados"},
+                ],
+                "cobertura": {
+                    "criterios_verificados": 1,
+                    "criterios_totales": 2,
+                    "criterios_pct": 50.0,
+                    "escenarios_dominio_verificados": 3,
+                    "escenarios_dominio_totales": 4,
+                    "escenarios_dominio_pct": 75.0,
+                },
+                "ejecucion": {"id": run_id, "version": "v2", "commit": "1234567890abcdef", "cambios_locales": False},
+                "accion_propuesta": {
+                    "estado": "APROBADA",
+                    "fingerprint": "demo123",
+                    "tag_idempotencia": "devsecops-fp-demo123",
+                    "titulo": "Corregir v2",
+                    "descripcion": "Excluir cancelados",
+                    "criterio_reevaluacion": "Reevaluar v2",
+                    "boards_resultado": {"operacion": "creada", "work_item_id": 12, "referencia": "AB#12", "url": "https://dev.azure.com/demo/12"},
+                },
+                "etapas_devsecops": [{"numero": 8, "estado": "verificado", "resumen": "Aprobada", "datos": {"Estado gobernanza": "APROBADA"}}],
+            }
+            (run_dir / "informe.json").write_text(json.dumps(sample_report, ensure_ascii=False), encoding="utf-8")
+
+            # Draft remediation (0 tokens deterministic)
+            draft = asyncio.run(generate_remediation(run_dir, use_ai=False))
+            self.assertTrue(draft["disponible"])
+            self.assertEqual(draft["origen"], "plantilla_determinista")
+            self.assertIn("contrato.Cancelado", draft["codigo_sugerido"])
+
+            # Reopen approved decision for next demo
+            with (patch("assessment.workflow.APPROVAL_LOCK", base / "approvals.sqlite3"),
+                  patch("assessment.demo_reset.revert_single_boards_task", return_value={"sincronizado": True}) as rev_task):
+                reopened = reopen_governance_decision(run_dir, sync_boards=True)
+                self.assertEqual(reopened["accion_propuesta"]["estado"], "PENDIENTE_APROBACION")
+                self.assertNotIn("boards_resultado", reopened["accion_propuesta"])
+                self.assertEqual(reopened["etapas_devsecops"][0]["estado"], "atencion")
+                rev_task.assert_called_once_with(12, target_state="Removed")
+
+            # Closed-loop resolution when VERIFICADO + reopen closure
+            close_id = "c" * 32
+            close_dir = runs_dir / close_id
+            close_dir.mkdir(parents=True)
+            (close_dir / "informe.json").write_text(json.dumps({
+                "politica_version": "REN-001.v2",
+                "criterio": CRITERION,
+                "veredicto": "VERIFICADO",
+                "resultados_trx": [{"outcome": "Passed"}],
+                "referencias": [{"id": "t.cs:1"}],
+                "ejecucion": {"id": close_id, "version": "v1", "commit": "abcdef123456"},
+                "cierre_ciclo_boards": {
+                    "estado": "LISTA_PARA_CERRAR",
+                    "work_item_id": 15,
+                    "referencia": "AB#15",
+                    "fingerprint": "fp15",
+                    "tag_idempotencia": "devsecops-fp-fp15",
+                    "url": "https://dev.azure.com/demo/15",
+                    "titulo": "Cerrar AB#15",
+                },
+                "etapas_devsecops": [{"numero": 8, "estado": "atencion", "resumen": "Pendiente cierre", "datos": {}}],
+            }), encoding="utf-8")
+            with (patch("assessment.workflow.APPROVAL_LOCK", base / "approvals.sqlite3"),
+                  patch("assessment.workflow.close_boards_task", return_value={
+                      "operacion": "cerrada", "work_item_id": 15, "referencia": "AB#15",
+                      "fingerprint": "fp15", "url": "https://dev.azure.com/demo/15",
+                  })):
+                closed = resolve_boards_closure(close_dir, note="Certificado")
+                self.assertEqual(closed["cierre_ciclo_boards"]["estado"], "CERRADA_VERIFICADA")
+
+            # Power BI metrics before reset
+            metrics = build_powerbi_metrics(runs_dir)
+            self.assertEqual(metrics["kpis"]["corridas_totales"], 2)
+            csv_text = render_powerbi_csv(runs_dir)
+            self.assertIn("ejecucion_id,fecha_utc,version", csv_text)
+            self.assertIn(run_id, csv_text)
+
+            # Reversible multi-demo reset & restore
+            fake_repo = base / "repo"
+            (fake_repo / "v1" / "src" / "Contratos").mkdir(parents=True)
+            (fake_repo / "v1" / "src" / "Contratos" / "datos.json").write_text("{}", encoding="utf-8")
+            reset_res = execute_demo_reset(fake_repo, runs_dir, reset_runs=True, reset_sandbox=True, reset_boards=False)
+            self.assertEqual(reset_res["corridas"]["archivadas"], 2)
+            self.assertIn("v1/src/Contratos/datos.json", reset_res["sandbox_archivos_limpiados"])
+            self.assertEqual(build_powerbi_metrics(runs_dir)["kpis"]["corridas_totales"], 0)
+
+            restored_res = restore_latest_archive(runs_dir)
+            self.assertEqual(restored_res["corridas_restauradas"], 2)
+            self.assertEqual(build_powerbi_metrics(runs_dir)["kpis"]["corridas_totales"], 2)
 
 
 if __name__ == "__main__":

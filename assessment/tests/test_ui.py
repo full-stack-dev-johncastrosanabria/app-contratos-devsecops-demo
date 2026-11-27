@@ -57,8 +57,25 @@ class DemoHTTP(unittest.TestCase):
                     self.assertEqual(request("GET", f"/informes/{run_id}/dotnet-test.log")[0], 200)
                     self.assertEqual(request("GET", f"/informes/{run_id}/checkpoint_aprobacion.json")[0], 200)
                     self.assertEqual(request("GET", "/api/ecosistema")[0], 200)
+                    self.assertEqual(request("GET", "/api/metricas-powerbi.json")[0], 200)
+                    st_csv, csv_body = request("GET", "/api/metricas-powerbi.csv")
+                    self.assertEqual(st_csv, 200)
+                    self.assertIn(b"ejecucion_id", csv_body)
+                    self.assertEqual(request("GET", "/copilot/openapi.yaml")[0], 200)
+                    self.assertEqual(request("GET", "/copilot/security-copilot-skill.yaml")[0], 200)
+                    st_rem, rem_body = request("POST", "/api/remediacion", json.dumps({"ejecucion": run_id, "usar_ia": False}), origin)
+                    self.assertEqual(st_rem, 200)
+                    self.assertTrue(json.loads(rem_body)["disponible"])
                     self.assertEqual(request("GET", "/.env")[0], 404)
                     assess.assert_awaited_once()
+
+                    # Reversible demo reset & restore over HTTP
+                    st_rst, rst_body = request("POST", "/api/demo/reiniciar", '{"corridas":true,"sandbox":false,"boards":false}', origin)
+                    self.assertEqual(st_rst, 200)
+                    self.assertEqual(json.loads(rst_body)["reinicio"]["corridas"]["archivadas"], 1)
+                    st_undo, undo_body = request("POST", "/api/demo/restaurar", "{}", origin)
+                    self.assertEqual(st_undo, 200)
+                    self.assertEqual(json.loads(undo_body)["restauracion"]["corridas_restauradas"], 1)
 
                 with patch("assessment.ui.start_sandbox", return_value={"activo": True, "version": "v2", "url": "http://127.0.0.1:5080"}):
                     self.assertEqual(request("POST", "/api/sandbox", '{"accion":"iniciar","version":"v9"}', origin)[0], 400)

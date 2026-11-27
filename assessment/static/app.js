@@ -11,6 +11,14 @@ const loadLatestBtn = document.querySelector("#load-latest");
 const helpToggleBtn = document.querySelector("#help-toggle-btn");
 const helpDrawer = document.querySelector("#help-drawer");
 const helpCloseBtn = document.querySelector("#help-close-btn");
+const demoResetToggleBtn = document.querySelector("#demo-reset-toggle-btn");
+const demoResetPanel = document.querySelector("#demo-reset-panel");
+const demoResetCloseBtn = document.querySelector("#demo-reset-close-btn");
+const demoResetApplyBtn = document.querySelector("#demo-reset-apply-btn");
+const demoRestoreBtn = document.querySelector("#demo-restore-btn");
+const resetRunsChk = document.querySelector("#reset-runs-chk");
+const resetSandboxChk = document.querySelector("#reset-sandbox-chk");
+const resetBoardsChk = document.querySelector("#reset-boards-chk");
 
 const sandboxPill = document.querySelector("#sandbox-pill");
 const sandboxText = document.querySelector("#sandbox-text");
@@ -41,43 +49,43 @@ const versionRoles = {
 const STAGE_CATALOG = [
   {
     numero: 1, bloque: "DevSec", etapa: "Planificar", herramienta: "Azure Boards",
-    pregunta: "¿Qué debía resolver esta entrega y bajo qué criterio formal se acepta?",
-    descripcion: "Audita la historia de usuario en Azure Boards (AB#1) y sus criterios de aceptación para REN-001.",
+    pregunta: "¿Qué debía resolver esta entrega y bajo qué criterios formales se acepta?",
+    descripcion: "Audita la historia de usuario en Azure Boards (AB#1) y sus criterios estructurados (REN-001, REN-002).",
   },
   {
-    numero: 2, bloque: "DevSec", etapa: "Crear código", herramienta: "GitHub PR",
-    pregunta: "¿Qué cambio implementó la historia y quién lo integró al repositorio?",
-    descripcion: "Conecta el commit evaluado con el Pull Request en GitHub y comprueba la trazabilidad bidireccional hacia AB#1.",
+    numero: 2, bloque: "DevSec", etapa: "Crear código", herramienta: "GitHub + VS Code + Copilot",
+    pregunta: "¿Qué cambio implementó la historia y bajo qué reglas de autoría se integró?",
+    descripcion: "Conecta el commit evaluado con el Pull Request en GitHub, vínculo AB#1 y gobernanza de GitHub Copilot en VS Code.",
   },
   {
-    numero: 3, bloque: "DevSec", etapa: "Asegurar origen", herramienta: "CodeQL + Dependabot",
-    pregunta: "¿Qué controles SAST y de dependencias se ejecutaron sobre el código?",
-    descripcion: "Consulta alertas abiertas de análisis estático (CodeQL) y vigilancia de paquetes (Dependabot).",
+    numero: 3, bloque: "DevSec", etapa: "Asegurar origen", herramienta: "GHAS · CodeQL · Dependabot",
+    pregunta: "¿Qué controles SAST, Secret Scanning, Dependabot y SBOM protegen el código?",
+    descripcion: "Consulta alertas abiertas de CodeQL, Pull Requests de Dependabot, protección de secretos e inventario SPDX SBOM.",
   },
   {
-    numero: 4, bloque: "DevSec", etapa: "Integrar y probar", herramienta: "Actions + xUnit TRX",
-    pregunta: "¿Qué pruebas pasaron y cuáles certifican explícitamente el criterio REN-001?",
-    descripcion: "Cruza el XML del TRX por testId y executionId contra la sintaxis C# y aplica la política determinista REN-001.v2.",
+    numero: 4, bloque: "DevSec", etapa: "Integrar y probar", herramienta: "Azure Pipelines + Actions + xUnit",
+    pregunta: "¿Qué pruebas pasaron y cuáles certifican explícitamente los criterios de aceptación?",
+    descripcion: "Cruza el XML del TRX contra la sintaxis C#, evalúa la matriz multi-criterio y verifica pipelines CI/CD.",
   },
   {
-    numero: 5, bloque: "CloudOps", etapa: "Desplegar", herramienta: "Container Apps",
-    pregunta: "¿Qué artefacto inmutable y revisión están activos en el ambiente cloud?",
-    descripcion: "Verifica en Azure Resource Manager la revisión activa del Container App, imagen publicada, commit y red.",
+    numero: 5, bloque: "CloudOps", etapa: "Desplegar", herramienta: "Container Apps + AKS Ready",
+    pregunta: "¿Qué artefacto inmutable y postura cloud-native respaldan el despliegue?",
+    descripcion: "Verifica la revisión activa en Azure Container Apps y audita los controles de endurecimiento Kubernetes en deploy/aks/.",
   },
   {
     numero: 6, bloque: "CloudOps", etapa: "Operar", herramienta: "Defender for Cloud",
-    pregunta: "¿Existen brechas de postura cloud que afecten al recurso desplegado?",
-    descripcion: "Consulta evaluaciones de Microsoft Defender en Resource Graph, HTTPS exclusivo y estado de Managed Identity.",
+    pregunta: "¿Cuál es el puntaje de postura CSPM y existen brechas en el recurso desplegado?",
+    descripcion: "Consulta Secure Score y evaluaciones de Microsoft Defender en Resource Graph, HTTPS exclusivo y Managed Identity.",
   },
   {
-    numero: 7, bloque: "CloudOps", etapa: "Observar y aprender", herramienta: "App Insights",
-    pregunta: "¿Cambió la tasa de errores 5xx o la latencia tras el despliegue?",
-    descripcion: "Ejecuta una consulta KQL sobre AppRequests en Log Analytics para medir volumen, fallos de servidor y latencia.",
+    numero: 7, bloque: "CloudOps", etapa: "Observar y aprender", herramienta: "Monitor · App Insights · Power BI",
+    pregunta: "¿Cambió la tasa de errores 5xx frente a la línea base y qué reflejan los KPIs en Power BI?",
+    descripcion: "Compara telemetría KQL reciente vs línea base en Log Analytics y alimenta datasets para Power BI y Fabric.",
   },
   {
-    numero: 8, bloque: "CloudOps", etapa: "Optimizar con IA", herramienta: "Foundry + Boards",
-    pregunta: "¿Qué remediación se propone y cómo se evita duplicar tareas en el backlog?",
-    descripcion: "Persiste un punto de control para revisión humana y sincroniza en Azure Boards con huella idempotente WIQL.",
+    numero: 8, bloque: "CloudOps", etapa: "Optimizar con IA", herramienta: "Fabric · AI Foundry · Security Copilot",
+    pregunta: "¿Qué remediación o cierre de ciclo proponemos con trazabilidad e idempotencia?",
+    descripcion: "Integra remediación asistida por IA, manifiesto OpenAPI para Security Copilot y cierre idempotente en Azure Boards.",
   },
 ];
 
@@ -112,6 +120,8 @@ const ENUM_TEXT = {
   INCUMPLIDO: "Incumplido",
   VERIFICADO: "Verificado",
   PENDIENTE_APROBACION: "Pendiente de aprobación",
+  LISTA_PARA_CERRAR: "Lista para cierre en Boards",
+  CERRADA_VERIFICADA: "Cerrada y verificada",
   APROBADA: "Aprobada",
   DESCARTADA: "Descartada",
   COMPLETADA: "Completada",
@@ -500,6 +510,90 @@ function createCopyButton(value, displayText, ariaLabel) {
   btn.append(svgIcon("copy", 13), element("span", displayText));
   btn.addEventListener("click", () => copyTextWithFeedback(btn, value, displayText));
   return btn;
+}
+
+// Invoker Commands (--copy) for code blocks with live-region bubble outside the button.
+const copyTimers = new WeakMap();
+let lastCopyAnnouncement = "";
+
+function reportBlockCopy(button, ok) {
+  const tip = button.nextElementSibling;
+  clearTimeout(copyTimers.get(button));
+  button.removeAttribute("data-copied");
+  button.removeAttribute("data-failed");
+  let message = ok ? "Copiado" : "Error al copiar";
+  if (message === lastCopyAnnouncement) message += "\u00A0";
+  lastCopyAnnouncement = message;
+  if (tip) tip.textContent = "";
+  const iconSlot = button.querySelector(".icon");
+  if (iconSlot) iconSlot.replaceChildren(svgIcon(ok ? "pass" : "fail", 13));
+  void button.offsetWidth;
+  button.setAttribute(ok ? "data-copied" : "data-failed", "");
+  if (tip) requestAnimationFrame(() => { tip.textContent = message; });
+  copyTimers.set(button, setTimeout(() => {
+    button.removeAttribute("data-copied");
+    button.removeAttribute("data-failed");
+    if (iconSlot) iconSlot.replaceChildren(svgIcon("copy", 13));
+    if (tip) tip.textContent = "";
+  }, 2000));
+}
+
+async function copyTargetElement(button, target) {
+  const text = target.matches("input, textarea") ? target.value : target.innerText.trim();
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    reportBlockCopy(button, true);
+  } catch {
+    reportBlockCopy(button, false);
+  }
+}
+
+if ("CommandEvent" in window) {
+  document.addEventListener("command", (event) => {
+    if (event.command.startsWith("--copy") && event.target) {
+      copyTargetElement(event.source, event.target);
+    }
+  }, true);
+} else {
+  document.addEventListener("click", (event) => {
+    if (event.defaultPrevented) return;
+    const button = event.target.closest('button[command^="--copy"]');
+    if (!button) return;
+    const target = document.getElementById(button.getAttribute("commandfor"));
+    if (target) copyTargetElement(button, target);
+  });
+}
+
+function renderValueKpis(kpis) {
+  if (!kpis) return;
+  const set = (sel, text) => {
+    const el = document.querySelector(sel);
+    if (el) el.textContent = text;
+  };
+  set("#kpi-runs", `${kpis.corridas_totales ?? 0} (${kpis.entregas_monitoreadas ?? 0}/3 entregas)`);
+  set("#kpi-evidence", `${kpis.controles_con_evidencia_pct ?? 0} %`);
+  set(
+    "#kpi-criteria",
+    kpis.criterios_vigentes_totales
+      ? `${kpis.criterios_vigentes_verificados}/${kpis.criterios_vigentes_totales} (${kpis.criterios_vigentes_pct} %)`
+      : "Sin corridas"
+  );
+  set(
+    "#kpi-boards",
+    `${kpis.acciones_boards_aprobadas ?? 0} aprob. · ${kpis.acciones_boards_cerradas ?? 0} cerr. · ${kpis.acciones_boards_pendientes ?? 0} pend.`
+  );
+}
+
+async function refreshAnalyticsStrip() {
+  try {
+    const res = await fetch("/api/metricas-powerbi.json");
+    if (!res.ok) return;
+    const data = await readJson(res);
+    if (data?.kpis) renderValueKpis(data.kpis);
+  } catch {
+    // Analytics strip degrades silently when offline.
+  }
 }
 
 function createSummary(labelText) {
@@ -926,6 +1020,8 @@ const TERMS = {
   CSPM: "Cloud Security Posture Management: postura de seguridad cloud en Defender",
   KQL: "Kusto Query Language: consultas de telemetría en Application Insights",
   SAST: "Análisis estático de seguridad del código fuente (CodeQL)",
+  SBOM: "Software Bill of Materials: inventario SPDX de paquetes y dependencias",
+  AKS: "Azure Kubernetes Service: orquestación cloud-native de contenedores",
 };
 const TERM_PATTERN = new RegExp(`\\b(${Object.keys(TERMS).map((t) => t.replace("-", "\\-")).join("|")})\\b`);
 
@@ -1212,12 +1308,130 @@ shortcutsToggle.addEventListener("change", () => {
 helpToggleBtn.addEventListener("click", () => setHelpOpen(helpDrawer.hidden));
 helpCloseBtn.addEventListener("click", () => setHelpOpen(false, { restore: true }));
 
+function syncArchiveRestoreButton(archivedList) {
+  if (!demoRestoreBtn) return;
+  const count = Array.isArray(archivedList) ? archivedList.length : 0;
+  demoRestoreBtn.hidden = count === 0;
+  if (count > 0) {
+    demoRestoreBtn.textContent = `Restaurar última sesión archivada (${count} ${count === 1 ? "respaldo" : "respaldos"})`;
+  }
+}
+
+function setDemoResetOpen(open) {
+  if (!demoResetPanel || !demoResetToggleBtn) return;
+  demoResetPanel.hidden = !open;
+  demoResetToggleBtn.setAttribute("aria-expanded", String(open));
+  if (!open) disarm(demoResetApplyBtn);
+}
+
+demoResetToggleBtn?.addEventListener("click", () => setDemoResetOpen(demoResetPanel.hidden));
+demoResetCloseBtn?.addEventListener("click", () => {
+  setDemoResetOpen(false);
+  demoResetToggleBtn.focus();
+});
+
+function clearAllCardsToIdle() {
+  reportsByVersion.clear();
+  provenanceByVersion.clear();
+  cachedLatest = {};
+  for (const [ver, card] of cards) {
+    card.hidden = false;
+    resetCardBands(
+      card,
+      "idle",
+      "Sin ejecutar",
+      "Selecciona «Ejecutar evaluación» para compilar de forma aislada, correr xUnit y auditar las 8 etapas de esta entrega.",
+      "Pendiente de corrida",
+      false
+    );
+  }
+  loadLatestBtn.hidden = true;
+  closeStageInspector();
+  syncVisibleCardGrid();
+  refreshStageViews();
+}
+
+demoResetApplyBtn?.addEventListener("click", async () => {
+  if (activeController) return;
+  const resetRuns = Boolean(resetRunsChk?.checked);
+  const resetSb = Boolean(resetSandboxChk?.checked);
+  const resetBd = Boolean(resetBoardsChk?.checked);
+  if (!resetRuns && !resetSb && !resetBd) {
+    setStatus("Selecciona al menos un componente para reiniciar la demostración.", "warn");
+    return;
+  }
+  if (demoResetApplyBtn.dataset.armed !== "true") {
+    arm(
+      demoResetApplyBtn,
+      resetBd ? "Confirmar reinicio local + Azure Boards" : "Confirmar reinicio reversible"
+    );
+    announce("Pulsa otra vez para confirmar el reinicio reversible de la demostración.");
+    return;
+  }
+  disarm(demoResetApplyBtn);
+  demoResetApplyBtn.disabled = true;
+  setStatus("Preparando entorno limpio para nueva sesión de demostración…", "busy");
+  try {
+    const res = await fetch("/api/demo/reiniciar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ corridas: resetRuns, sandbox: resetSb, boards: resetBd }),
+    });
+    const data = await readJson(res);
+    if (!res.ok) throw new Error(data.error || "No se pudo reiniciar el entorno de demostración.");
+    if (resetRuns) clearAllCardsToIdle();
+    if (data.analitica) renderValueKpis(data.analitica);
+    if (data.sandbox) updateSandboxBanner(data.sandbox);
+    syncArchiveRestoreButton(data.reinicio?.archivos_disponibles || []);
+    const archivedCount = data.reinicio?.corridas?.archivadas || 0;
+    const boardsRemoved = data.reinicio?.boards?.cantidad_tareas_retiradas;
+    const boardsMsg = typeof boardsRemoved === "number" ? ` · ${boardsRemoved} tarea(s) demo retiradas en Boards` : "";
+    setStatus(
+      `Entorno listo para nueva demo (${archivedCount} corrida(s) archivadas de forma reversible${boardsMsg}).`,
+      "pass"
+    );
+    setDemoResetOpen(false);
+  } catch (err) {
+    setStatus(describeFetchError(err, "No se pudo completar el reinicio de demostración."), "error");
+  } finally {
+    demoResetApplyBtn.disabled = false;
+  }
+});
+
+demoRestoreBtn?.addEventListener("click", async () => {
+  if (activeController) return;
+  demoRestoreBtn.disabled = true;
+  setStatus("Restaurando la última sesión de demostración archivada…", "busy");
+  try {
+    const res = await fetch("/api/demo/restaurar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const data = await readJson(res);
+    if (!res.ok) throw new Error(data.error || "No se pudo restaurar la sesión archivada.");
+    cachedLatest = data.ultimos || {};
+    if (data.analitica) renderValueKpis(data.analitica);
+    syncArchiveRestoreButton(data.restauracion?.archivos_disponibles || []);
+    restoreCachedRuns({ stamp: true });
+    setStatus(
+      `Sesión restaurada (${data.restauracion?.corridas_restauradas || 0} corrida(s) recuperadas).`,
+      "pass"
+    );
+    setDemoResetOpen(false);
+  } catch (err) {
+    setStatus(describeFetchError(err, "No se pudo restaurar la sesión archivada."), "error");
+  } finally {
+    demoRestoreBtn.disabled = false;
+  }
+});
+
 // Sandbox Bridge (:5080) with popup-blocker resilience & inline retry
 const launchLabel = (ver, active) => (active ? `${ver} activa en :5080` : `Iniciar ${ver} en :5080`);
 
 // Two deliberate clicks within 4 s for anything that stops or replaces a live process.
 function arm(btn, prompt) {
-  const label = btn === runBtn ? runBtnLabel : btn;
+  const label = btn === runBtn ? runBtnLabel : (btn.querySelector("span") || btn);
   if (!btn.dataset.label) btn.dataset.label = label.textContent;
   btn.dataset.armed = "true";
   label.textContent = prompt;
@@ -1227,7 +1441,7 @@ function arm(btn, prompt) {
 
 function disarm(btn) {
   clearTimeout(btn._armTimer);
-  const label = btn === runBtn ? runBtnLabel : btn;
+  const label = btn === runBtn ? runBtnLabel : (btn.querySelector("span") || btn);
   if (btn.dataset.armed === "true" && btn.dataset.label) label.textContent = btn.dataset.label;
   delete btn.dataset.armed;
   delete btn.dataset.label;
@@ -1472,6 +1686,7 @@ function resetCardBands(card, state, label, reasonText, provenanceText = "Pendie
   card.querySelector(".card-proof-band").replaceChildren();
   card.querySelector(".evidence").replaceChildren();
   card.querySelector(".governance").replaceChildren();
+  card.querySelector(".remediation")?.replaceChildren();
   card.querySelector(".downloads").replaceChildren();
 }
 
@@ -1491,8 +1706,33 @@ function renderDeterministicProof(card, report) {
   if (typeof report.ejecucion?.archivos_firmados === "number" && report.ejecucion.archivos_firmados > 0) {
     metaStrip.append(termText("span", `${report.ejecucion.archivos_firmados} archivos firmados con SHA-256`, "meta-pill"));
   }
+  const cob = report.cobertura;
+  if (cob && typeof cob.escenarios_dominio_pct === "number") {
+    const xmlPart = cob.cobertura_xml ? ` · Cobertura líneas ${cob.cobertura_xml.lineas_pct}%` : "";
+    metaStrip.append(element("span", `Escenarios verificados: ${cob.escenarios_dominio_verificados}/${cob.escenarios_dominio_totales} (${cob.escenarios_dominio_pct}%)${xmlPart}`, "meta-pill"));
+  }
   band.append(head);
   if (metaStrip.childElementCount) band.append(metaStrip);
+
+  const evaluatedCriteria = report.criterios_evaluados || [];
+  if (evaluatedCriteria.length > 0) {
+    const critList = element("ul", null, "criteria-list");
+    for (const item of evaluatedCriteria) {
+      const li = element("li", null, "criteria-item");
+      const copy = element("div", null, "criteria-copy");
+      const roleTag = item.rol === "primario" ? "Criterio primario" : item.rol === "secundario" ? "Criterio secundario" : "Backlog Boards";
+      copy.append(
+        element("strong", `${item.id} · ${roleTag}`),
+        element("span", item.texto)
+      );
+      const b = element("span", null, "badge");
+      const meta = VERDICT_META[item.veredicto] || { state: "unknown", label: humanize(item.veredicto) };
+      setBadge(b, meta.state, meta.label);
+      li.append(copy, b);
+      critList.append(li);
+    }
+    band.append(critList);
+  }
 
   const linkedRefs = report.referencias || [];
   const linkedMethods = new Set(linkedRefs.map((r) => (r.metodo || "").split(".").pop()).filter(Boolean));
@@ -1690,10 +1930,103 @@ function renderAgentInvestigation(card, report) {
   }
 }
 
+function createReopenDecisionButton(card, version, runId) {
+  const reopenBtn = element("button", "Reabrir para otra demo", "btn-ghost");
+  reopenBtn.type = "button";
+  reopenBtn.addEventListener("click", async () => {
+    if (reopenBtn.dataset.armed !== "true") {
+      arm(reopenBtn, "¿Revertir decisión? Pulsa otra vez");
+      return;
+    }
+    disarm(reopenBtn);
+    reopenBtn.disabled = true;
+    setStatus(`Reabriendo punto de control de ${version} para repetir demostración…`, "busy");
+    try {
+      const res = await fetch("/api/acciones", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ejecucion: runId, decision: "reabrir", sincronizar_boards: true }),
+      });
+      const data = await readJson(res);
+      if (!res.ok) throw new Error(data.error || "No se pudo reabrir la decisión.");
+      const currentReport = reportsByVersion.get(version);
+      if (currentReport) {
+        currentReport.accion_propuesta = data.accion_propuesta;
+        currentReport.cierre_ciclo_boards = data.cierre_ciclo_boards;
+        if (data.etapas_devsecops?.length) currentReport.etapas_devsecops = data.etapas_devsecops;
+      }
+      renderGovernance(card, version, runId, data.accion_propuesta, true, data.cierre_ciclo_boards);
+      refreshStageViews();
+      refreshAnalyticsStrip();
+      setStatus(`Decisión de ${version} reabierta y lista para otra demostración.`, "pass");
+    } catch (err) {
+      reopenBtn.disabled = false;
+      setStatus(describeFetchError(err, "No se pudo reabrir la decisión."), "error");
+    }
+  });
+  return reopenBtn;
+}
+
 // REN-001 certifies one rule; high-severity SecOps findings are surfaced next to it, never folded away.
-function renderGovernance(card, version, runId, action, focusResult = false) {
+function renderGovernance(card, version, runId, action, focusResult = false, closure = null) {
   const box = card.querySelector(".governance");
   box.replaceChildren();
+
+  if (!action && closure) {
+    const panel = element("div", null, "gov-panel");
+    panel.dataset.state = closure.estado === "CERRADA_VERIFICADA" ? "APROBADA" : "PENDIENTE_APROBACION";
+    const header = element("div", null, "gov-head");
+    const heading = element("span", null, "gov-heading");
+    heading.append(svgIcon("doc", 14), element("span", "Cierre de ciclo · Azure Boards"));
+    header.append(heading);
+    panel.append(header);
+    if (closure.estado === "CERRADA_VERIFICADA") {
+      const br = closure.boards_resultado || closure;
+      const row = element("div", null, "gov-resolved-row");
+      const msg = element("p", "Tarea cerrada tras verificación determinista: ", "gov-result");
+      const link = document.createElement("a");
+      link.href = br.url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.append(element("span", br.referencia), element("span", " (se abre en una nueva pestaña)", "sr-only"));
+      msg.append(link);
+      row.append(msg, createReopenDecisionButton(card, version, runId));
+      panel.append(row);
+      box.append(panel);
+      return;
+    }
+    panel.append(element("p", `${closure.titulo}. El dictamen VERIFICADO permite cerrar la tarea abierta en Boards.`, "gov-title"));
+    const closeBtn = element("button", `Cerrar ${closure.referencia} en Azure Boards`, "btn-approve");
+    closeBtn.type = "button";
+    closeBtn.addEventListener("click", async () => {
+      closeBtn.disabled = true;
+      setStatus(`Cerrando ${closure.referencia} en Azure Boards…`, "busy");
+      try {
+        const res = await fetch("/api/acciones", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ejecucion: runId, decision: "cerrar", nota: `Certificado en verde (${version})` }),
+        });
+        const data = await readJson(res);
+        if (!res.ok) throw new Error(data.error || "No se pudo cerrar la tarea en Azure Boards.");
+        const currentReport = reportsByVersion.get(version);
+        if (currentReport) {
+          currentReport.cierre_ciclo_boards = data.cierre_ciclo_boards;
+          if (data.etapas_devsecops?.length) currentReport.etapas_devsecops = data.etapas_devsecops;
+        }
+        renderGovernance(card, version, runId, null, true, data.cierre_ciclo_boards);
+        refreshStageViews();
+        refreshAnalyticsStrip();
+        setStatus(`Tarea ${closure.referencia} cerrada en Azure Boards con evidencia certificada.`, "pass");
+      } catch (err) {
+        closeBtn.disabled = false;
+        setStatus(describeFetchError(err, "No se pudo cerrar la tarea en Azure Boards."), "error");
+      }
+    });
+    panel.append(closeBtn);
+    box.append(panel);
+    return;
+  }
 
   if (!action) {
     box.append(element("p", "Conforme con REN-001: no requiere acción correctiva en Azure Boards.", "gov-clean-note"));
@@ -1720,6 +2053,7 @@ function renderGovernance(card, version, runId, action, focusResult = false) {
 
   if (action.estado === "APROBADA" && action.boards_resultado) {
     const br = action.boards_resultado;
+    const row = element("div", null, "gov-resolved-row");
     const msg = element("p", `Tarea ${br.operacion} sin duplicados en Boards: `, "gov-result");
     msg.tabIndex = -1;
     const link = document.createElement("a");
@@ -1728,16 +2062,19 @@ function renderGovernance(card, version, runId, action, focusResult = false) {
     link.rel = "noopener";
     link.append(element("span", br.referencia), element("span", " (se abre en una nueva pestaña)", "sr-only"));
     msg.append(link);
-    panel.append(msg);
+    row.append(msg, createReopenDecisionButton(card, version, runId));
+    panel.append(row);
     box.append(panel);
     if (focusResult) msg.focus({ preventScroll: true });
     return;
   }
 
   if (action.estado === "DESCARTADA") {
+    const row = element("div", null, "gov-resolved-row");
     const msg = element("p", `Recomendación descartada. Motivo registrado: ${action.nota_humana || "Sin nota adicional"}`, "gov-result");
     msg.tabIndex = -1;
-    panel.append(msg);
+    row.append(msg, createReopenDecisionButton(card, version, runId));
+    panel.append(row);
     box.append(panel);
     if (focusResult) msg.focus({ preventScroll: true });
     return;
@@ -1822,6 +2159,7 @@ function renderGovernance(card, version, runId, action, focusResult = false) {
       }
       renderGovernance(card, version, runId, data.accion_propuesta, true);
       refreshStageViews();
+      refreshAnalyticsStrip();
       setStatus(
         decision === "aprobar"
           ? `Tarea sincronizada en Azure Boards (${data.accion_propuesta?.boards_resultado?.referencia || "OK"})`
@@ -1932,6 +2270,96 @@ function renderGovernance(card, version, runId, action, focusResult = false) {
   box.append(panel);
 }
 
+function renderRemediation(card, version, report) {
+  const container = card.querySelector(".remediation");
+  if (!container) return;
+  container.replaceChildren();
+  const runId = report.ejecucion?.id;
+  if (!runId || report.veredicto === "VERIFICADO") return;
+
+  const panel = element("div", null, "rem-panel");
+  const head = element("div", null, "rem-head");
+  const title = element("span", null, "gov-heading");
+  title.append(svgIcon("info", 14), element("span", "Asistente de remediación · C# / xUnit"));
+  head.append(title);
+
+  const actions = element("div", null, "rem-actions");
+  const detBtn = element("button", "Borrador determinista · 0 tokens", "btn-secondary");
+  detBtn.type = "button";
+  const aiBtn = element("button", "Generar con Azure AI Foundry", "btn-ghost");
+  aiBtn.type = "button";
+  actions.append(detBtn, aiBtn);
+
+  const outBox = element("div", null, "rem-output");
+  outBox.hidden = true;
+
+  const loadDraft = async (useAi, triggerBtn) => {
+    if (useAi && !confirmPaidRun(triggerBtn, 1, "agente")) return;
+    detBtn.disabled = true;
+    aiBtn.disabled = true;
+    setStatus(
+      useAi ? `Generando borrador C# con Azure AI Foundry para ${version}…` : `Preparando plantilla determinista C# para ${version}…`,
+      "busy"
+    );
+    try {
+      const res = await fetch("/api/remediacion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ejecucion: runId, usar_ia: useAi }),
+      });
+      const draft = await readJson(res);
+      if (!res.ok) throw new Error(draft.error || "No se pudo generar el borrador de remediación.");
+      outBox.replaceChildren();
+      const sourceLabel = draft.origen === "agente_ia"
+        ? `Generado por IA (${draft.proveedor || "Foundry"})`
+        : "Plantilla determinista verificada (0 tokens)";
+      outBox.append(
+        element("p", `${sourceLabel} · Archivo sugerido: ${draft.archivo_objetivo}`, "rem-file"),
+        element("p", draft.explicacion, "source-ref-line")
+      );
+      if (draft.nota_ia) outBox.append(element("p", draft.nota_ia, "rem-disclaimer"));
+
+      const codeId = `rem-snippet-${version}`;
+      const copyWrap = element("div", null, "copyable");
+      const copySpan = element("span", null, "copy");
+      const copyBtn = element("button", null, "copy-button");
+      copyBtn.type = "button";
+      copyBtn.setAttribute("command", "--copy");
+      copyBtn.setAttribute("commandfor", codeId);
+      copyBtn.setAttribute("aria-label", `Copiar código C# sugerido para ${version}`);
+      const iconSpan = element("span", null, "icon");
+      iconSpan.setAttribute("aria-hidden", "true");
+      iconSpan.append(svgIcon("copy", 13));
+      copyBtn.append(iconSpan, element("span", "Copiar C#"));
+      const tip = element("span", "", "tip");
+      tip.setAttribute("role", "status");
+      copySpan.append(copyBtn, tip);
+
+      const pre = element("pre", null, "rem-pre");
+      pre.tabIndex = 0;
+      const code = element("code", draft.codigo_sugerido);
+      code.id = codeId;
+      pre.append(code);
+      copyWrap.append(copySpan, pre);
+
+      outBox.append(copyWrap, element("p", draft.advertencia, "rem-disclaimer"));
+      outBox.hidden = false;
+      setStatus(`Borrador de remediación listo para ${version}.`, "pass");
+    } catch (err) {
+      setStatus(describeFetchError(err, "No se pudo generar el borrador de remediación."), "error");
+    } finally {
+      detBtn.disabled = false;
+      aiBtn.disabled = false;
+    }
+  };
+
+  detBtn.addEventListener("click", () => loadDraft(false, detBtn));
+  aiBtn.addEventListener("click", () => loadDraft(true, aiBtn));
+
+  panel.append(head, actions, outBox);
+  container.append(panel);
+}
+
 function renderDownloads(card, report) {
   const downloads = card.querySelector(".downloads");
   downloads.replaceChildren();
@@ -1983,7 +2411,8 @@ function showReport(card, version, report, options = {}) {
 
   renderDeterministicProof(card, report);
   renderAgentInvestigation(card, report);
-  renderGovernance(card, version, report.ejecucion?.id, report.accion_propuesta, false);
+  renderGovernance(card, version, report.ejecucion?.id, report.accion_propuesta, false, report.cierre_ciclo_boards);
+  renderRemediation(card, version, report);
   renderDownloads(card, report);
   refreshStageViews();
   if (options.stamp) replayClass(card, "is-stamped", 820);
@@ -2169,6 +2598,7 @@ async function executeAssessment(selectedVersions, mode, options = {}) {
     formControls.forEach((el) => { el.disabled = false; });
     setRunning(false);
     refreshStageViews();
+    refreshAnalyticsStrip();
     loadLatestBtn.hidden = Object.keys(cachedLatest).length === 0;
   }
 }
@@ -2208,6 +2638,12 @@ function handleEscape(event) {
   if (!stageInspector.hidden) {
     event.preventDefault();
     closeStageInspector();
+    return;
+  }
+  if (demoResetPanel && !demoResetPanel.hidden) {
+    event.preventDefault();
+    setDemoResetOpen(false);
+    demoResetToggleBtn?.focus();
     return;
   }
   if (!helpDrawer.hidden) {
@@ -2287,6 +2723,8 @@ async function initEcosystem() {
     const data = await readJson(res);
     const eco = data.ecosistema || {};
     cachedLatest = data.ultimos || {};
+    if (data.analitica) renderValueKpis(data.analitica);
+    syncArchiveRestoreButton(data.archivos_demo || []);
 
     const navMap = [
       ["#nav-boards", eco.boards_url],

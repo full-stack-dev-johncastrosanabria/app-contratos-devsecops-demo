@@ -13,11 +13,15 @@ from threading import Lock
 import time
 import urllib.request
 
-from .__main__ import ROOT, apply_decision, assess_project
+from .__main__ import ROOT, apply_closure, apply_decision, apply_reopen, assess_project
+from .analytics import build_powerbi_metrics, render_powerbi_csv
+from .demo_reset import execute_demo_reset, list_archived_sessions, restore_latest_archive
 from .integrations import load_settings
+from .remediation import generate_remediation
 from .workflow import DecisionAlreadyResolved
 
 STATIC = Path(__file__).with_name("static")
+COPILOT_DIR = ROOT / "copilot"
 OUTPUT = ROOT / "assessment/runs"
 EVAL_LOCK = Lock()
 SANDBOX_LOCK = Lock()
@@ -31,6 +35,10 @@ ASSETS = {
     "/style.css": ("style.css", "text/css"),
     "/favicon.svg": ("favicon.svg", "image/svg+xml"),
     "/brand-mark.png": ("brand-mark.png", "image/png"),
+}
+COPILOT_FILES = {
+    "/copilot/openapi.yaml": "openapi.yaml",
+    "/copilot/security-copilot-skill.yaml": "security-copilot-skill.yaml",
 }
 REPORTS = {
     "informe.md": "text/plain",
@@ -114,13 +122,21 @@ def _format_summary(report: dict) -> dict:
         "veredicto", "justificacion", "siguiente_paso", "referencias",
         "investigacion", "diagnosticos",
     )}
-    for optional_key in ("politica_version", "investigacion_secops", "etapas_devsecops", "accion_propuesta"):
+    for optional_key in (
+        "politica_version",
+        "criterios_evaluados",
+        "cobertura",
+        "investigacion_secops",
+        "etapas_devsecops",
+        "accion_propuesta",
+        "cierre_ciclo_boards",
+    ):
         if optional_key in report:
             summary[optional_key] = report[optional_key]
     summary["resultados_trx"] = [{"outcome": row["outcome"], "name": row.get("name")} for row in report["resultados_trx"]]
     summary["ejecucion"] = {
         key: report["ejecucion"].get(key)
-        for key in ("id", "version", "trx", "log", "commit")
+        for key in ("id", "version", "trx", "log", "commit", "cobertura_xml")
     }
     if "sha256_archivos" in report["ejecucion"]:
         summary["ejecucion"]["archivos_firmados"] = len(report["ejecucion"]["sha256_archivos"] or {})
@@ -134,6 +150,8 @@ def latest_reports(output_dir: Path) -> dict[str, dict]:
         return {}
     latest_by_version: dict[str, tuple[float, dict]] = {}
     for report_file in output_dir.glob("*/informe.json"):
+        if report_file.parent.name.startswith("_"):
+            continue
         try:
             mtime = report_file.stat().st_mtime
             data = json.loads(report_file.read_text(encoding="utf-8"))
@@ -162,6 +180,10 @@ def ecosystem_links() -> dict:
         "github_pr_url": f"https://github.com/{gh_repo}/pull/1" if gh_repo else None,
         "github_actions_url": f"https://github.com/{gh_repo}/actions" if gh_repo else None,
         "github_security_url": f"https://github.com/{gh_repo}/security" if gh_repo else None,
+        "powerbi_csv_url": "/api/metricas-powerbi.csv",
+        "powerbi_json_url": "/api/metricas-powerbi.json",
+        "security_copilot_url": "/copilot/security-copilot-skill.yaml",
+        "openapi_url": "/copilot/openapi.yaml",
         "sandbox": _probe_local_sandbox(),
     }
 
@@ -171,7 +193,7 @@ class DemoHandler(BaseHTTPRequestHandler):
     def host(self) -> str:
         return f"127.0.0.1:{self.server.server_port}"
 
-    def send_content(self, status: int, content: bytes, mime: str) -> None:
+    def send_content(self, status: int, content: bytes, mime: str, extra_headers: dict[str, str] | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", f"{mime}; charset=utf-8")
         self.send_header("Content-Length", str(len(content)))
@@ -182,6 +204,8 @@ class DemoHandler(BaseHTTPRequestHandler):
             "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
             "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
         )
+        for header_name, header_val in (extra_headers or {}).items():
+            self.send_header(header_name, header_val)
         self.end_headers()
         self.wfile.write(content)
 
@@ -210,8 +234,26 @@ class DemoHandler(BaseHTTPRequestHandler):
             name, mime = ASSETS[clean_path]
             self.send_content(200, (STATIC / name).read_bytes(), mime)
             return
+        if clean_path in COPILOT_FILES:
+            target = COPILOT_DIR / COPILOT_FILES[clean_path]
+            if target.is_file():
+                self.send_content(200, target.read_bytes(), "text/yaml")
+                return
         if clean_path == "/api/ecosistema":
-            self.send_json(200, {"ecosistema": ecosystem_links(), "ultimos": latest_reports(OUTPUT)})
+            self.send_json(200, {
+                "ecosistema": ecosystem_links(),
+                "ultimos": latest_reports(OUTPUT),
+                "analitica": build_powerbi_metrics(OUTPUT)["kpis"],
+                "archivos_demo": list_archived_sessions(OUTPUT),
+            })
+            return
+        if clean_path == "/api/metricas-powerbi.json":
+            self.send_json(200, build_powerbi_metrics(OUTPUT))
+            return
+        if clean_path == "/api/metricas-powerbi.csv":
+            csv_bytes = render_powerbi_csv(OUTPUT).encode("utf-8")
+            headers = {"Content-Disposition": 'attachment; filename="nextgen-devsecops-powerbi.csv"'}
+            self.send_content(200, csv_bytes, "text/csv", extra_headers=headers)
             return
         match = re.fullmatch(r"/informes/([0-9a-f]{32})/([a-z0-9_.-]+)", clean_path)
         if match and match[2] in REPORTS:
@@ -230,6 +272,15 @@ class DemoHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/acciones":
             self._handle_action()
+            return
+        if self.path == "/api/remediacion":
+            self._handle_remediation()
+            return
+        if self.path == "/api/demo/reiniciar":
+            self._handle_demo_reset()
+            return
+        if self.path == "/api/demo/restaurar":
+            self._handle_demo_restore()
             return
         if self.path == "/api/sandbox":
             self._handle_sandbox()
@@ -265,14 +316,20 @@ class DemoHandler(BaseHTTPRequestHandler):
             run_id = payload["ejecucion"]
             decision = payload["decision"]
             note = str(payload.get("nota") or "")[:300]
-            if not re.fullmatch(r"[0-9a-f]{32}", str(run_id)) or decision not in ("aprobar", "descartar"):
+            sync_boards = bool(payload.get("sincronizar_boards", True))
+            if not re.fullmatch(r"[0-9a-f]{32}", str(run_id)) or decision not in ("aprobar", "descartar", "cerrar", "reabrir"):
                 raise ValueError
         except (ValueError, KeyError, TypeError):
             self.send_json(400, {"error": "Solicitud de aprobación inválida."})
             return
         try:
             with EVAL_LOCK:
-                updated = apply_decision(OUTPUT / run_id, decision == "aprobar", note)
+                if decision == "reabrir":
+                    updated = apply_reopen(OUTPUT / run_id, sync_boards=sync_boards)
+                elif decision == "cerrar":
+                    updated = apply_closure(OUTPUT / run_id, note)
+                else:
+                    updated = apply_decision(OUTPUT / run_id, decision == "aprobar", note)
         except DecisionAlreadyResolved as exc:
             self.send_json(409, {"error": str(exc)})
             return
@@ -284,7 +341,82 @@ class DemoHandler(BaseHTTPRequestHandler):
             return
         self.send_json(200, {
             "accion_propuesta": updated.get("accion_propuesta"),
+            "cierre_ciclo_boards": updated.get("cierre_ciclo_boards"),
             "etapas_devsecops": updated.get("etapas_devsecops", []),
+        })
+
+    def _handle_remediation(self) -> None:
+        try:
+            payload = self._read_json_body(512)
+            run_id = payload["ejecucion"]
+            use_ai = bool(payload.get("usar_ia", False))
+            if not re.fullmatch(r"[0-9a-f]{32}", str(run_id)):
+                raise ValueError
+        except (ValueError, KeyError, TypeError):
+            self.send_json(400, {"error": "Indicá un ID de ejecución válido para generar remediación."})
+            return
+        try:
+            draft = asyncio.run(generate_remediation(OUTPUT / run_id, use_ai=use_ai))
+        except FileNotFoundError:
+            self.send_json(404, {"error": "No se encontró la ejecución indicada."})
+            return
+        except Exception as exc:
+            self.send_json(500, {"error": f"No se pudo generar el borrador de remediación: {exc}"})
+            return
+        self.send_json(200, draft)
+
+    def _handle_demo_reset(self) -> None:
+        try:
+            payload = self._read_json_body(512)
+            reset_runs = bool(payload.get("corridas", True))
+            reset_sandbox = bool(payload.get("sandbox", True))
+            reset_boards = bool(payload.get("boards", False))
+        except (ValueError, TypeError):
+            self.send_json(400, {"error": "Parámetros de reinicio de demostración inválidos."})
+            return
+        try:
+            with EVAL_LOCK:
+                if reset_sandbox:
+                    stop_sandbox()
+                res = execute_demo_reset(
+                    ROOT,
+                    OUTPUT,
+                    reset_runs=reset_runs,
+                    reset_sandbox=reset_sandbox,
+                    reset_boards=reset_boards,
+                )
+        except Exception as exc:
+            self.send_json(500, {"error": f"No se pudo reiniciar el estado de demostración: {exc}"})
+            return
+        self.send_json(200, {
+            "reinicio": res,
+            "ultimos": latest_reports(OUTPUT),
+            "analitica": build_powerbi_metrics(OUTPUT)["kpis"],
+            "sandbox": _probe_local_sandbox(),
+        })
+
+    def _handle_demo_restore(self) -> None:
+        try:
+            payload = self._read_json_body(512)
+            sesion = payload.get("sesion")
+            if sesion is not None and not isinstance(sesion, str):
+                raise ValueError
+        except (ValueError, TypeError):
+            self.send_json(400, {"error": "Solicitud de restauración inválida."})
+            return
+        try:
+            with EVAL_LOCK:
+                res = restore_latest_archive(OUTPUT, session_name=sesion)
+        except FileNotFoundError as exc:
+            self.send_json(404, {"error": str(exc)})
+            return
+        except Exception as exc:
+            self.send_json(500, {"error": f"No se pudo restaurar la sesión archivada: {exc}"})
+            return
+        self.send_json(200, {
+            "restauracion": res,
+            "ultimos": latest_reports(OUTPUT),
+            "analitica": build_powerbi_metrics(OUTPUT)["kpis"],
         })
 
     def _handle_sandbox(self) -> None:

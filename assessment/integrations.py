@@ -1,4 +1,4 @@
-"""Integraciones de lectura y seguimiento DevSecOps (Azure Boards, GitHub y Azure)."""
+"""Integraciones de lectura, postura estática y seguimiento DevSecOps (Azure Boards, GitHub, AKS, Defender y Azure)."""
 from base64 import b64encode
 from hashlib import sha256
 import html
@@ -17,6 +17,7 @@ ADO_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798"
 ARM_RESOURCE = "https://management.azure.com/"
 LOG_RESOURCE = "https://api.loganalytics.io/"
 POLICY_VERSION = "REN-001.v2"
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def load_settings() -> dict[str, str]:
@@ -77,6 +78,20 @@ def _strip_html(text: str) -> str:
     return re.sub(r"\n{2,}", "\n", html.unescape(cleaned)).strip()
 
 
+def parse_boards_criteria(acceptance_text: str) -> list[dict]:
+    criteria: list[dict] = []
+    seen: set[str] = set()
+    for line in (acceptance_text or "").splitlines():
+        match = re.search(r"\b(REN-\d+)\s*[:·\-–]\s*(.+)", line.strip(), flags=re.I)
+        if match:
+            cid = match[1].upper()
+            txt = match[2].strip().rstrip(".")
+            if cid not in seen and txt:
+                seen.add(cid)
+                criteria.append({"id": cid, "texto": txt})
+    return criteria
+
+
 def _ado_headers(settings: dict[str, str], content_type: str = "application/json") -> dict[str, str] | None:
     pat = settings.get("AZURE_DEVOPS_PAT")
     if pat:
@@ -86,6 +101,92 @@ def _ado_headers(settings: dict[str, str], content_type: str = "application/json
     if token:
         return {"Authorization": f"Bearer {token}", "Content-Type": content_type}
     return None
+
+
+def audit_copilot_governance(repo_root: Path = REPO_ROOT) -> dict:
+    path = repo_root / ".github" / "copilot-instructions.md"
+    if not path.is_file():
+        return {"configurado": False, "archivo": ".github/copilot-instructions.md"}
+    raw = path.read_bytes()
+    text = raw.decode("utf-8", errors="replace")
+    enforces_trait = 'Trait("Criterio"' in text
+    enforces_dateonly = "DateOnly" in text
+    enforces_csp = "Content-Security-Policy" in text
+    return {
+        "configurado": True,
+        "archivo": ".github/copilot-instructions.md",
+        "sha256": sha256(raw).hexdigest()[:12],
+        "reglas_verificadas": sum((enforces_trait, enforces_dateonly, enforces_csp)),
+        "reglas_totales": 3,
+        "exige_trait_criterio": enforces_trait,
+        "exige_dateonly_fijo": enforces_dateonly,
+    }
+
+
+def audit_ci_pipelines(repo_root: Path = REPO_ROOT) -> dict:
+    gh_wf = repo_root / ".github" / "workflows" / "devsecops.yml"
+    az_pipe = repo_root / "azure-pipelines.yml"
+    gh_ok = gh_wf.is_file() and "assessment.ci" in gh_wf.read_text(encoding="utf-8", errors="replace")
+    az_ok = az_pipe.is_file() and "PublishTestResults@2" in az_pipe.read_text(encoding="utf-8", errors="replace")
+    return {
+        "github_actions_definido": gh_ok,
+        "azure_pipelines_definido": az_ok,
+        "pipelines_verificados": int(gh_ok) + int(az_ok),
+    }
+
+
+def audit_aks_manifests(repo_root: Path = REPO_ROOT) -> dict:
+    aks_dir = repo_root / "deploy" / "aks"
+    dep_file = aks_dir / "deployment.yaml"
+    svc_file = aks_dir / "service.yaml"
+    net_file = aks_dir / "networkpolicy.yaml"
+    if not (dep_file.is_file() and svc_file.is_file() and net_file.is_file()):
+        return {"disponible": False, "controles_verificados": 0, "controles_totales": 6}
+    dep = dep_file.read_text(encoding="utf-8", errors="replace")
+    net = net_file.read_text(encoding="utf-8", errors="replace")
+    checks = {
+        "runAsNonRoot": bool(re.search(r"runAsNonRoot:\s*true", dep)),
+        "readOnlyRootFilesystem": bool(re.search(r"readOnlyRootFilesystem:\s*true", dep)),
+        "allowPrivilegeEscalationFalse": bool(re.search(r"allowPrivilegeEscalation:\s*false", dep)),
+        "dropAllCapabilities": bool(re.search(r"drop:\s*\n\s*-\s*ALL", dep)),
+        "resourceLimits": bool(re.search(r"limits:\s*\n\s*cpu:", dep) and re.search(r"memory:", dep)),
+        "networkPolicyZeroTrust": "kind: NetworkPolicy" in net and "Ingress" in net and "Egress" in net,
+    }
+    passed = sum(1 for v in checks.values() if v)
+    return {
+        "disponible": True,
+        "ruta": "deploy/aks/",
+        "archivos": ["deployment.yaml", "service.yaml", "networkpolicy.yaml"],
+        "controles_verificados": passed,
+        "controles_totales": len(checks),
+        "endurecido": passed == len(checks),
+        "detalle_controles": checks,
+    }
+
+
+def audit_security_copilot_plugin(repo_root: Path = REPO_ROOT) -> dict:
+    spec = repo_root / "copilot" / "openapi.yaml"
+    skill = repo_root / "copilot" / "security-copilot-skill.yaml"
+    if not (spec.is_file() and skill.is_file()):
+        return {"disponible": False}
+    skill_txt = skill.read_text(encoding="utf-8", errors="replace")
+    ops = re.findall(r"^\s*-\s*Name:\s*(\w+)", skill_txt, flags=re.M)
+    return {
+        "disponible": True,
+        "openapi": "copilot/openapi.yaml",
+        "manifiesto": "copilot/security-copilot-skill.yaml",
+        "habilidades": ops,
+        "habilidades_count": len(ops),
+    }
+
+
+def audit_repo_governance(repo_root: Path = REPO_ROOT) -> dict:
+    return {
+        "copilot": audit_copilot_governance(repo_root),
+        "pipelines": audit_ci_pipelines(repo_root),
+        "aks": audit_aks_manifests(repo_root),
+        "security_copilot": audit_security_copilot_plugin(repo_root),
+    }
 
 
 def fetch_boards_story(settings: dict[str, str]) -> dict:
@@ -106,6 +207,7 @@ def fetch_boards_story(settings: dict[str, str]) -> dict:
             {"tipo": rel.get("rel"), "url": rel.get("url"), "comentario": (rel.get("attributes") or {}).get("comment")}
             for rel in (data.get("relations") or [])
         ]
+        acceptance = _strip_html(fields.get("Microsoft.VSTS.Common.AcceptanceCriteria", ""))
         web_url = f"{org}/{proj_enc}/_workitems/edit/{data['id']}"
         return {
             "disponible": True,
@@ -114,7 +216,8 @@ def fetch_boards_story(settings: dict[str, str]) -> dict:
             "tipo": fields.get("System.WorkItemType"),
             "titulo": fields.get("System.Title"),
             "estado": fields.get("System.State"),
-            "criterios_aceptacion": _strip_html(fields.get("Microsoft.VSTS.Common.AcceptanceCriteria", "")),
+            "criterios_aceptacion": acceptance,
+            "criterios_estructurados": parse_boards_criteria(acceptance),
             "tags": fields.get("System.Tags", ""),
             "url": web_url,
             "relaciones": relations,
@@ -134,10 +237,24 @@ def fetch_github_context(settings: dict[str, str], commit_sha: str | None) -> di
     base = f"https://api.github.com/repos/{repo}"
     out: dict = {"disponible": True, "repositorio": repo, "url_repositorio": f"https://github.com/{repo}"}
     try:
-        pulls = _http_json("GET", f"{base}/pulls?state=all&per_page=10", headers)
-        pr = next((p for p in pulls if "AB#" in (p.get("body") or "") or "AB#" in (p.get("title") or "")), pulls[0] if pulls else None)
+        pulls = _http_json("GET", f"{base}/pulls?state=all&per_page=20", headers)
+        human_pulls = [p for p in pulls if "dependabot" not in ((p.get("user") or {}).get("login") or "").lower()]
+        pr = next(
+            (p for p in human_pulls if "AB#" in (p.get("body") or "") or "AB#" in (p.get("title") or "")),
+            human_pulls[0] if human_pulls else (pulls[0] if pulls else None),
+        )
         if pr:
             ab_refs = sorted(set(re.findall(r"AB#\d+", f"{pr.get('title', '')} {pr.get('body', '')}")))
+            reviews_approved = 0
+            review_state = "integrado" if pr.get("merged_at") else pr.get("state", "open")
+            try:
+                reviews = _http_json("GET", f"{base}/pulls/{pr['number']}/reviews", headers)
+                if isinstance(reviews, list):
+                    reviews_approved = sum(1 for r in reviews if r.get("state") == "APPROVED")
+                    if reviews_approved > 0:
+                        review_state = f"{reviews_approved} aprobación(es)"
+            except Exception:
+                pass
             out["pull_request"] = {
                 "numero": pr["number"],
                 "titulo": pr["title"],
@@ -145,8 +262,11 @@ def fetch_github_context(settings: dict[str, str], commit_sha: str | None) -> di
                 "autor": (pr.get("user") or {}).get("login"),
                 "merge_commit_sha": pr.get("merge_commit_sha"),
                 "referencias_boards": ab_refs,
+                "revisiones_aprobadas": reviews_approved,
+                "gobernanza_revision": review_state,
                 "url": pr["html_url"],
             }
+
         runs_data = _http_json("GET", f"{base}/actions/runs?per_page=10", headers)
         runs = runs_data.get("workflow_runs", [])
         ci_run = next((r for r in runs if commit_sha and r.get("head_sha") == commit_sha), runs[0] if runs else None)
@@ -161,7 +281,58 @@ def fetch_github_context(settings: dict[str, str], commit_sha: str | None) -> di
                 "url": ci_run.get("html_url"),
                 "artefactos": [a["name"] for a in artifacts_data.get("artifacts", [])],
             }
-        seguridad: dict = {"dependabot_configurado": True, "code_scanning": {"estado": "no_disponible", "alertas_abiertas": 0, "hallazgos": []}}
+
+        dep_open_prs = [
+            {"numero": p["number"], "titulo": p.get("title"), "url": p.get("html_url")}
+            for p in pulls
+            if p.get("state") == "open" and "dependabot" in ((p.get("user") or {}).get("login") or "").lower()
+        ]
+        dep_alerts_open: int | None = None
+        try:
+            dep_alerts = _http_json("GET", f"{base}/dependabot/alerts?state=open&per_page=20", headers)
+            if isinstance(dep_alerts, list):
+                dep_alerts_open = len(dep_alerts)
+        except urllib.error.HTTPError:
+            dep_alerts_open = None
+
+        secret_alerts_open: int | None = None
+        secret_status = "no_disponible"
+        try:
+            sec_alerts = _http_json("GET", f"{base}/secret-scanning/alerts?state=open&per_page=10", headers)
+            if isinstance(sec_alerts, list):
+                secret_alerts_open = len(sec_alerts)
+                secret_status = "activo"
+        except urllib.error.HTTPError as err:
+            secret_status = "proteccion_push" if err.code in (403, 404) else f"http_{err.code}"
+
+        sbom_info = {"disponible": False, "paquetes": 0}
+        try:
+            sbom_res = _http_json("GET", f"{base}/dependency-graph/sbom", headers)
+            sbom_doc = (sbom_res.get("sbom") if isinstance(sbom_res, dict) else None) or {}
+            pkgs = sbom_doc.get("packages") or []
+            sbom_info = {
+                "disponible": True,
+                "formato": sbom_doc.get("spdxVersion", "SPDX-2.3"),
+                "paquetes": len(pkgs),
+                "url": f"https://api.github.com/repos/{repo}/dependency-graph/sbom",
+            }
+        except Exception:
+            pass
+
+        seguridad: dict = {
+            "dependabot_configurado": (REPO_ROOT / ".github" / "dependabot.yml").is_file(),
+            "dependabot": {
+                "prs_abiertos": len(dep_open_prs),
+                "prs": dep_open_prs[:5],
+                "alertas_abiertas": dep_alerts_open,
+            },
+            "secret_scanning": {
+                "estado": secret_status,
+                "alertas_abiertas": secret_alerts_open,
+            },
+            "sbom": sbom_info,
+            "code_scanning": {"estado": "no_disponible", "alertas_abiertas": 0, "hallazgos": []},
+        }
         try:
             alerts = _http_json("GET", f"{base}/code-scanning/alerts?state=open&per_page=20", headers)
             if isinstance(alerts, list):
@@ -205,11 +376,12 @@ def fetch_azure_runtime(settings: dict[str, str]) -> dict:
     out: dict = {"disponible": True, "despliegue": {}, "defender": {}, "telemetria": {}}
 
     app_id = f"/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.App/containerApps/{app_name}"
+    props: dict = {}
     try:
         ca = _http_json("GET", f"https://management.azure.com{app_id}?api-version=2024-03-01", arm_headers)
-        props = ca.get("properties", {})
+        props = ca.get("properties", {}) if isinstance(ca, dict) else {}
         ingress = (props.get("configuration") or {}).get("ingress") or {}
-        identity_type = (ca.get("identity") or {}).get("type", "None")
+        identity_type = ((ca.get("identity") if isinstance(ca, dict) else None) or {}).get("type", "None")
         fqdn = ingress.get("fqdn")
         out["despliegue"] = {
             "recurso": app_name,
@@ -281,9 +453,34 @@ def fetch_azure_runtime(settings: dict[str, str]) -> dict:
                 "alcance": "ambiente",
                 "detalle": f"Defender for Cloud ({rg}): {row.get('displayName')}",
             })
+
+        score_pct: float | None = None
+        try:
+            score_query = {
+                "subscriptions": [sub],
+                "query": (
+                    "securityresources | where type == 'microsoft.security/securescores' "
+                    "| where name == 'ascScore' "
+                    "| extend pct=todouble(properties.score.percentage), current=todouble(properties.score.current), max=todouble(properties.score.max) "
+                    "| project pct, current, max | limit 1"
+                ),
+            }
+            score_res = _http_json(
+                "POST",
+                "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2022-10-01",
+                arm_headers,
+                score_query,
+            )
+            srows = score_res.get("data") or []
+            if srows and srows[0].get("pct") is not None:
+                score_pct = round(float(srows[0]["pct"]) * 100.0, 1)
+        except Exception:
+            score_pct = None
+
         out["defender"] = {
             "evaluaciones_totales_rg": len(rows),
             "evaluaciones_no_saludables": len(unhealthy),
+            "puntaje_seguro_pct": score_pct,
             "https_exclusivo_verificado": desp.get("https_exclusivo", False),
             "hallazgos": posture_findings,
         }
@@ -291,6 +488,7 @@ def fetch_azure_runtime(settings: dict[str, str]) -> dict:
         out["defender"] = {
             "evaluaciones_totales_rg": 0,
             "evaluaciones_no_saludables": 0,
+            "puntaje_seguro_pct": None,
             "hallazgos": posture_findings,
             "nota": f"Consulta Resource Graph no disponible ({type(exc).__name__}).",
         }
@@ -302,9 +500,14 @@ def fetch_azure_runtime(settings: dict[str, str]) -> dict:
                 kql = {
                     "query": (
                         "AppRequests | where TimeGenerated > ago(24h) "
-                        "| summarize total=count(), fallos=countif(Success == false or toint(ResultCode) >= 500), "
+                        "| summarize total=count(), "
+                        "fallos=countif(Success == false or toint(ResultCode) >= 500), "
                         "errores_cliente=countif(toint(ResultCode) >= 400 and toint(ResultCode) < 500), "
-                        "latencia_ms=round(avg(DurationMs), 2)"
+                        "latencia_ms=round(avg(DurationMs), 2), "
+                        "recientes_1h=countif(TimeGenerated > ago(1h)), "
+                        "fallos_1h=countif(TimeGenerated > ago(1h) and (Success == false or toint(ResultCode) >= 500)), "
+                        "base_previa=countif(TimeGenerated <= ago(1h)), "
+                        "fallos_base=countif(TimeGenerated <= ago(1h) and (Success == false or toint(ResultCode) >= 500))"
                     )
                 }
                 qres = _http_json(
@@ -314,18 +517,38 @@ def fetch_azure_runtime(settings: dict[str, str]) -> dict:
                     kql,
                 )
                 tables = qres.get("tables") or []
-                rows = tables[0].get("rows", [[0, 0, 0, 0.0]]) if tables else [[0, 0, 0, 0.0]]
-                total, fallos, err_cli, lat = (rows[0] + [0, 0, 0, 0.0])[:4]
+                default_row = [0, 0, 0, 0.0, 0, 0, 0, 0]
+                rows = tables[0].get("rows", [default_row]) if tables else [default_row]
+                total, fallos, err_cli, lat, rec_1h, fallos_1h, base_prev, fallos_base = (rows[0] + default_row)[:8]
                 total = int(total or 0)
                 fallos = int(fallos or 0)
+                rec_1h = int(rec_1h or 0)
+                fallos_1h = int(fallos_1h or 0)
+                base_prev = int(base_prev or 0)
+                fallos_base = int(fallos_base or 0)
+                rate_recent = round((fallos_1h / rec_1h) * 100, 2) if rec_1h else 0.0
+                rate_base = round((fallos_base / base_prev) * 100, 2) if base_prev else None
+                comparison = (
+                    f"Estable vs línea base ({rate_recent}% 1h vs {rate_base}% previo)"
+                    if rate_base is not None and rate_recent <= rate_base
+                    else (
+                        f"Degradación (+{round(rate_recent - rate_base, 2)} pp vs línea base)"
+                        if rate_base is not None
+                        else "Línea base inicial en captura (ventana única 24h)"
+                    )
+                )
                 out["telemetria"] = {
                     "disponible": True,
-                    "ventana": "últimas 24h",
+                    "ventana": "últimas 24h (1h reciente vs 23h base)",
                     "total_solicitudes": total,
                     "fallos_5xx": fallos,
                     "errores_4xx": int(err_cli or 0),
                     "tasa_error_pct": round((fallos / total) * 100, 2) if total else 0.0,
                     "latencia_promedio_ms": float(lat or 0.0),
+                    "solicitudes_1h": rec_1h,
+                    "solicitudes_base": base_prev,
+                    "tiene_linea_base": base_prev > 0,
+                    "comparacion_base": comparison,
                 }
             except Exception as exc:
                 out["telemetria"] = {"disponible": False, "motivo": f"Consulta KQL falló ({type(exc).__name__})."}
@@ -334,6 +557,41 @@ def fetch_azure_runtime(settings: dict[str, str]) -> dict:
     else:
         out["telemetria"] = {"disponible": False, "motivo": "AZURE_LOG_ANALYTICS_WORKSPACE_ID no configurado."}
     return out
+
+
+def find_open_boards_task(settings: dict[str, str], version: str, criterion_id: str) -> dict | None:
+    org = settings.get("AZURE_DEVOPS_ORG_URL", "").rstrip("/")
+    project = settings.get("AZURE_DEVOPS_PROJECT", "")
+    if not org or not project:
+        return None
+    headers = _ado_headers(settings)
+    if not headers:
+        return None
+    fp = action_fingerprint(version, criterion_id)
+    tag = f"devsecops-fp-{fp}"
+    proj_enc = urllib.parse.quote(project)
+    wiql = {
+        "query": (
+            f"SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = '{project}' "
+            f"AND [System.WorkItemType] = 'Task' AND [System.Tags] CONTAINS '{tag}' "
+            "AND [System.State] <> 'Closed' AND [System.State] <> 'Removed'"
+        )
+    }
+    try:
+        found = _http_json("POST", f"{org}/{proj_enc}/_apis/wit/wiql?api-version=7.1", headers, wiql)
+        items = found.get("workItems") or []
+        if not items:
+            return None
+        wid = items[0]["id"]
+        return {
+            "work_item_id": wid,
+            "referencia": f"AB#{wid}",
+            "fingerprint": fp,
+            "tag_idempotencia": tag,
+            "url": f"{org}/{proj_enc}/_workitems/edit/{wid}",
+        }
+    except Exception:
+        return None
 
 
 def collect_devsecops_context(commit_sha: str | None) -> dict:
@@ -349,6 +607,7 @@ def collect_devsecops_context(commit_sha: str | None) -> dict:
         "boards": fetch_boards_story(settings),
         "github": fetch_github_context(settings, commit_sha),
         "azure": fetch_azure_runtime(settings),
+        "gobernanza_repo": audit_repo_governance(REPO_ROOT),
     }
 
 
@@ -380,6 +639,70 @@ def build_proposed_action(report: dict) -> dict | None:
         "descripcion": report["siguiente_paso"] or report["justificacion"],
         "criterio_reevaluacion": f"Repetir evaluación sobre {version} y confirmar estado VERIFICADO con política {POLICY_VERSION}.",
         "historia_padre": (report.get("devsecops", {}).get("boards") or {}).get("id", 1),
+    }
+
+
+def build_closure_candidate(report: dict) -> dict | None:
+    if report.get("veredicto") != "VERIFICADO":
+        return None
+    settings = load_settings()
+    if settings.get("DEVSECOPS_LIVE") == "0":
+        return None
+    version = report["ejecucion"]["version"]
+    criterion_id = report["criterio"]["id"]
+    open_task = find_open_boards_task(settings, version, criterion_id)
+    if not open_task:
+        return None
+    return {
+        "requiere_aprobacion": True,
+        "estado": "LISTA_PARA_CERRAR",
+        "work_item_id": open_task["work_item_id"],
+        "referencia": open_task["referencia"],
+        "fingerprint": open_task["fingerprint"],
+        "tag_idempotencia": open_task["tag_idempotencia"],
+        "url": open_task["url"],
+        "titulo": f"Cerrar {open_task['referencia']} tras certificación VERIFICADO de {version}",
+    }
+
+
+def close_boards_task(report: dict, comment: str = "") -> dict:
+    closure = report.get("cierre_ciclo_boards")
+    if not closure:
+        raise ValueError("Este informe no tiene una tarea abierta en Azure Boards pendiente de cierre.")
+    settings = load_settings()
+    org = settings.get("AZURE_DEVOPS_ORG_URL", "").rstrip("/")
+    project = settings.get("AZURE_DEVOPS_PROJECT", "")
+    if not org or not project:
+        raise RuntimeError("Configurá AZURE_DEVOPS_ORG_URL y AZURE_DEVOPS_PROJECT en assessment/.env.")
+    patch_headers = _ado_headers(settings, content_type="application/json-patch+json")
+    if not patch_headers:
+        raise RuntimeError("No se encontraron credenciales para cerrar tareas en Azure Boards.")
+
+    proj_enc = urllib.parse.quote(project)
+    wid = closure["work_item_id"]
+    run_id = report["ejecucion"]["id"]
+    commit = report["ejecucion"].get("commit") or "sin-commit"
+    note = html.escape(comment.strip()) if comment.strip() else "Cerrada tras verificación determinista en verde."
+    history = (
+        f"<p><b>Cierre de ciclo DevSecOps ({POLICY_VERSION}):</b> La entrega <code>{html.escape(report['ejecucion']['version'])}</code> "
+        f"alcanzó dictamen <code>VERIFICADO</code> en la corrida <code>{run_id}</code> (commit <code>{html.escape(str(commit))}</code>). "
+        f"Nota: {note}</p>"
+    )
+    _http_json(
+        "PATCH",
+        f"{org}/{proj_enc}/_apis/wit/workitems/{wid}?api-version=7.1",
+        patch_headers,
+        [
+            {"op": "add", "path": "/fields/System.State", "value": "Closed"},
+            {"op": "add", "path": "/fields/System.History", "value": history},
+        ],
+    )
+    return {
+        "operacion": "cerrada",
+        "work_item_id": wid,
+        "referencia": f"AB#{wid}",
+        "fingerprint": closure["fingerprint"],
+        "url": f"{org}/{proj_enc}/_workitems/edit/{wid}",
     }
 
 

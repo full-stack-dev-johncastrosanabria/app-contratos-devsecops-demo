@@ -13,6 +13,32 @@ PROJECT = Path("tests/Contratos.Tests/Contratos.Tests.csproj")
 APP = Path("src/Contratos")
 TRX_NS = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
 CRITERION = {"id": "REN-001", "texto": "Al evaluar renovaciones, un contrato cancelado no debe generar un aviso"}
+SECONDARY_CRITERION = {
+    "id": "REN-002",
+    "texto": "Al evaluar contratos activos a 30, 7 y 1 día, evaluaciones repetidas el mismo día generan un único aviso sin duplicados",
+}
+
+
+def read_cobertura(directory: Path) -> dict | None:
+    candidates = sorted(directory.rglob("*cobertura*.xml"))
+    if not candidates:
+        return None
+    path = candidates[0]
+    root = ET.parse(path).getroot()
+    if root.tag != "coverage":
+        raise ValueError("El archivo XML de cobertura no tiene raíz Cobertura válida")
+    line_rate = round(float(root.get("line-rate", "0")) * 100, 2)
+    branch_rate = round(float(root.get("branch-rate", "0")) * 100, 2)
+    return {
+        "archivo": path.relative_to(directory).as_posix(),
+        "sha256": sha256(path.read_bytes()).hexdigest(),
+        "lineas_pct": line_rate,
+        "ramas_pct": branch_rate,
+        "lineas_cubiertas": int(root.get("lines-covered", "0")),
+        "lineas_validas": int(root.get("lines-valid", "0")),
+        "ramas_cubiertas": int(root.get("branches-covered", "0")),
+        "ramas_validas": int(root.get("branches-valid", "0")),
+    }
 
 
 @dataclass
@@ -157,6 +183,13 @@ def collect(root: Path, output: Path) -> Evidence:
             evidence.diagnose("TRX_INVALIDO", str(exc))
     else:
         evidence.diagnose("TRX_AUSENTE", "dotnet test no produjo un TRX en esta ejecución")
+
+    try:
+        cobertura = read_cobertura(directory)
+        if cobertura is not None:
+            identity["cobertura_xml"] = cobertura
+    except (OSError, ET.ParseError, ValueError) as exc:
+        evidence.diagnose("COBERTURA_INVALIDA", str(exc))
 
     if identity["codigo_dotnet"] not in (0, None):
         log_text = log_path.read_text(encoding="utf-8", errors="replace")

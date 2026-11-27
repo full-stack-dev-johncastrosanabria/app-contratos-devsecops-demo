@@ -25,8 +25,8 @@ Dos agentes especializados sobre **Microsoft Agent Framework (MAF)** y **Azure A
 
 - **Superficie principal remodelada:** Consola web local del evaluador servida en `http://127.0.0.1:8050` (`assessment/static/index.html`, `assessment/static/style.css`, `assessment/static/app.js`) por `assessment/ui.py`.
 - **Puente interoperable:** lanza y detiene bajo demanda instancias reales de las tres versiones sujetas a prueba (`v1`, `v2`, `v3`) en `http://127.0.0.1:5080`.
-- **Ecosistema conectado:** enlaza evidencia real con Azure Boards (`AB#1` e ítems hijos), GitHub (`PR #1`, GitHub Actions, CodeQL, Dependabot), Azure Container Apps (`ca-appcontratos`), Microsoft Defender for Cloud y Application Insights.
-- **Uso habitual:** demostraciones ejecutivas en vivo (con zoom de presentación y lectura rápida de estados comparados) y auditorías técnicas locales con o sin consumo de tokens (`agente` vs. `solo-evidencia`).
+- **Ecosistema conectado:** enlaza evidencia real con Azure Boards (`AB#1` multi-criterio e ítems hijos), GitHub (`PR #1`, GitHub Copilot en VS Code, GitHub Actions, Azure Pipelines espejo, CodeQL, Dependabot, Secret Scanning y SBOM SPDX), Azure Container Apps (`ca-appcontratos`) + postura Kubernetes (`deploy/aks/`), Microsoft Defender for Cloud (Secure Score + Managed Identity), Application Insights, conectores tabulares para Power BI / Microsoft Fabric y manifiesto OpenAPI para Microsoft Security Copilot.
+- **Uso habitual:** demostraciones ejecutivas repetibles en vivo (con reinicio y restauración 100 % reversibles entre sesiones, zoom de presentación y lectura rápida de estados comparados) y auditorías técnicas locales con o sin consumo de tokens (`agente` vs. `solo-evidencia`).
 
 ## Capabilities and Constraints
 

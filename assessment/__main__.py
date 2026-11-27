@@ -4,8 +4,16 @@ import asyncio
 import json
 from pathlib import Path
 
+from .demo_reset import execute_demo_reset, restore_latest_archive
 from .integrations import load_settings
-from .workflow import DecisionAlreadyResolved, Request, resolve_human_decision, run
+from .workflow import (
+    DecisionAlreadyResolved,
+    Request,
+    reopen_governance_decision,
+    resolve_boards_closure,
+    resolve_human_decision,
+    run,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -44,6 +52,12 @@ def markdown(report: dict) -> str:
                      for row in results.values())
         lines.extend(f"- Fuente inspeccionada `{path}`" for path in
                      sorted({ref["archivo"] for ref in report["pruebas_fuente"]}))
+
+    criteria_list = report.get("criterios_evaluados") or []
+    if criteria_list:
+        lines += ["", "## Matriz de criterios evaluados", "", "| Criterio | Rol | Veredicto | Evidencia |", "| --- | --- | --- | --- |"]
+        for c in criteria_list:
+            lines.append(f"| `{c['id']}` | {c.get('rol', 'primario')} | `{c['veredicto']}` | {c.get('resumen', '')} |")
 
     stages = report.get("etapas_devsecops") or []
     if stages:
@@ -84,6 +98,11 @@ def markdown(report: dict) -> str:
         elif action.get("nota_humana"):
             lines.append(f"- Nota: {action['nota_humana']}")
 
+    closure = report.get("cierre_ciclo_boards")
+    if closure:
+        lines += ["", "## Cierre de Ciclo (Azure Boards)", ""]
+        lines.append(f"- Estado: `{closure['estado']}` · Tarea [{closure['referencia']}]({closure['url']})")
+
     if report["siguiente_paso"]:
         lines += ["", "## Siguiente paso", "", report["siguiente_paso"]]
     return "\n".join(lines) + "\n"
@@ -111,6 +130,18 @@ def apply_decision(run_directory: Path, approve: bool, note: str = "") -> dict:
     return report
 
 
+def apply_closure(run_directory: Path, note: str = "") -> dict:
+    report = resolve_boards_closure(run_directory, note=note)
+    (run_directory / "informe.md").write_text(markdown(report), encoding="utf-8")
+    return report
+
+
+def apply_reopen(run_directory: Path, sync_boards: bool = True) -> dict:
+    report = reopen_governance_decision(run_directory, sync_boards=sync_boards)
+    (run_directory / "informe.md").write_text(markdown(report), encoding="utf-8")
+    return report
+
+
 async def assess(roots: list[Path], output: Path, agent: bool, devsecops: bool | None = None) -> int:
     error = False
     for root in roots:
@@ -134,18 +165,49 @@ async def assess(roots: list[Path], output: Path, agent: bool, devsecops: bool |
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Evalúa el ciclo DevSecOps y evidencia xUnit del criterio REN-001")
-    parser.add_argument("proyecto", help="v1, v2, v3, una carpeta de proyecto, 'todas' o 'aprobar'/'descartar'")
+    parser.add_argument(
+        "proyecto",
+        help="v1, v2, v3, carpeta, 'todas', 'aprobar'/'descartar'/'cerrar'/'reabrir' o 'reiniciar-demo'/'restaurar-demo'",
+    )
     parser.add_argument("--modo", choices=("solo-evidencia", "agente"), default="solo-evidencia")
     parser.add_argument("--salida", type=Path, default=ROOT / "assessment/runs")
-    parser.add_argument("--ejecucion", help="ID de ejecución para aprobar o descartar su acción propuesta")
-    parser.add_argument("--motivo", default="", help="Nota o motivo de aprobación/descarte")
-    parser.add_argument("--sin-nube", action="store_true", help="Omitir consultas en vivo a Boards, GitHub y Azure")
+    parser.add_argument("--ejecucion", help="ID de ejecución para aprobar, descartar, cerrar o reabrir su acción")
+    parser.add_argument("--motivo", default="", help="Nota o motivo de aprobación/descarte/cierre")
+    parser.add_argument("--sin-nube", action="store_true", help="Omitir consultas o reinicio en vivo en Boards, GitHub y Azure")
+    parser.add_argument("--con-boards", action="store_true", help="En reiniciar-demo, retirar tareas devsecops-fp-* y restaurar AB#1")
     args = parser.parse_args()
 
-    if args.proyecto in ("aprobar", "descartar"):
+    if args.proyecto == "reiniciar-demo":
+        res = execute_demo_reset(
+            ROOT,
+            args.salida.resolve(),
+            reset_runs=True,
+            reset_sandbox=True,
+            reset_boards=bool(args.con_boards and not args.sin_nube),
+        )
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.proyecto == "restaurar-demo":
+        res = restore_latest_archive(args.salida.resolve())
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.proyecto in ("aprobar", "descartar", "cerrar", "reabrir"):
         if not args.ejecucion:
-            parser.error("Indicá --ejecucion <id> para aprobar o descartar una acción.")
+            parser.error("Indicá --ejecucion <id> para gestionar una acción en Azure Boards.")
         try:
+            if args.proyecto == "reabrir":
+                updated = apply_reopen(args.salida.resolve() / args.ejecucion, sync_boards=not args.sin_nube)
+                state = (updated.get("accion_propuesta") or updated.get("cierre_ciclo_boards") or {}).get("estado", "REABIERTA")
+                print(f"{args.ejecucion} · {state}")
+                return 0
+            if args.proyecto == "cerrar":
+                updated = apply_closure(args.salida.resolve() / args.ejecucion, args.motivo)
+                cl = updated["cierre_ciclo_boards"]
+                res = cl.get("boards_resultado") or {}
+                print(f"{args.ejecucion} · {cl['estado']} · {res.get('referencia', cl['referencia'])} {res.get('url', '')}".strip())
+                return 0
             updated = apply_decision(args.salida.resolve() / args.ejecucion, args.proyecto == "aprobar", args.motivo)
         except DecisionAlreadyResolved as exc:
             parser.error(str(exc))

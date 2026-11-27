@@ -56,7 +56,21 @@
             <path d="M9 2.25 3.5 4.5v4.25c0 3.4 2.35 6.35 5.5 7 3.15-.65 5.5-3.6 5.5-7V4.5L9 2.25Z"></path>
             <path d="m6.75 9 1.6 1.6 3-3.2"></path>
           </svg>
-          <span>CodeQL y Dependabot</span>
+          <span>GHAS · CodeQL · SBOM</span>
+          <span class="sr-only"> (se abre en una nueva pestaña)</span>
+        </a>
+        <a id="nav-powerbi" class="eco-pill" href="/api/metricas-powerbi.csv">
+          <svg viewBox="0 0 18 18" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M4 14.5v-5M9 14.5v-8M14 14.5v-11"></path>
+          </svg>
+          <span>Power BI · CSV</span>
+        </a>
+        <a id="nav-copilot" class="eco-pill" href="/copilot/security-copilot-skill.yaml" target="_blank" rel="noopener">
+          <svg viewBox="0 0 18 18" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <circle cx="9" cy="9" r="6.25"></circle>
+            <path d="M6.5 9.5 8.2 11.2 11.8 7"></path>
+          </svg>
+          <span>Security Copilot</span>
           <span class="sr-only"> (se abre en una nueva pestaña)</span>
         </a>
       </nav>
@@ -107,6 +121,12 @@
           </p>
         </div>
         <div class="deck-utility">
+          <button type="button" class="btn-ghost" id="demo-reset-toggle-btn" aria-expanded="false" aria-controls="demo-reset-panel">
+            <svg viewBox="0 0 18 18" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <path d="M3.5 9a5.5 5.5 0 1 0 1.4-3.65L3.25 7M3.25 3.75V7H6.5"></path>
+            </svg>
+            <span>Reiniciar demo</span>
+          </button>
           <button type="button" class="btn-secondary" id="help-toggle-btn" aria-expanded="false" aria-controls="help-drawer">
             <svg viewBox="0 0 18 18" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
               <circle cx="9" cy="9" r="6.75"></circle>
@@ -116,6 +136,25 @@
           </button>
         </div>
       </div>
+
+      <section id="demo-reset-panel" class="demo-reset-panel" hidden aria-labelledby="demo-reset-title">
+        <div class="demo-reset-head">
+          <div>
+            <h2 id="demo-reset-title">Preparar entorno para múltiples demos (100 % reversible)</h2>
+            <p class="section-sub">Limpia el estado entre audiencias sin perder historial: las corridas se archivan y pueden restaurarse en cualquier momento.</p>
+          </div>
+          <button type="button" class="btn-ghost" id="demo-reset-close-btn">Cerrar<span class="kbd-hint"> (Esc)</span></button>
+        </div>
+        <div class="demo-reset-options" role="group" aria-labelledby="demo-reset-title">
+          <label class="shortcut-toggle"><input type="checkbox" id="reset-runs-chk" checked> Archivar corridas y reiniciar KPIs en pantalla</label>
+          <label class="shortcut-toggle"><input type="checkbox" id="reset-sandbox-chk" checked> Limpiar contratos locales de prueba en :5080 (<code>datos.json</code> en v1, v2 y v3)</label>
+          <label class="shortcut-toggle"><input type="checkbox" id="reset-boards-chk"> Reiniciar tareas demo en Azure Boards (pasa <code>devsecops-fp-*</code> a <code>Removed</code> y restaura <code>AB#1</code>)</label>
+        </div>
+        <div class="demo-reset-actions">
+          <button type="button" class="btn-primary" id="demo-reset-apply-btn"><span>Dejar listo para nueva demo</span></button>
+          <button type="button" class="btn-secondary" id="demo-restore-btn" hidden>Restaurar última sesión archivada</button>
+        </div>
+      </section>
 
       <section id="help-drawer" class="help-drawer" hidden aria-labelledby="help-drawer-title" tabindex="-1">
         <div class="help-drawer-head">
@@ -274,6 +313,38 @@
         </section>
     </section>
 
+    <section class="value-section" id="value-section" aria-labelledby="value-title">
+      <div class="value-head">
+        <div>
+          <h2 id="value-title">Valor continuo y analítica exportable</h2>
+          <p class="section-sub">Indicadores históricos consolidados para Power BI, Microsoft Fabric y Microsoft Security Copilot.</p>
+        </div>
+        <div class="value-actions">
+          <a class="btn-secondary" href="/api/metricas-powerbi.csv">Descargar CSV Power BI</a>
+          <a class="btn-ghost" href="/api/metricas-powerbi.json" target="_blank" rel="noopener">JSON Fabric<span class="sr-only"> (se abre en una nueva pestaña)</span></a>
+          <a class="btn-ghost" href="/copilot/openapi.yaml" target="_blank" rel="noopener">OpenAPI Security Copilot<span class="sr-only"> (se abre en una nueva pestaña)</span></a>
+        </div>
+      </div>
+      <dl class="value-kpis" id="value-kpis">
+        <div class="kpi-tile">
+          <dt>Corridas auditadas</dt>
+          <dd id="kpi-runs">—</dd>
+        </div>
+        <div class="kpi-tile">
+          <dt>Controles con evidencia</dt>
+          <dd id="kpi-evidence">—</dd>
+        </div>
+        <div class="kpi-tile">
+          <dt>Matriz de criterios vigente</dt>
+          <dd id="kpi-criteria">—</dd>
+        </div>
+        <div class="kpi-tile">
+          <dt>Ciclo Azure Boards</dt>
+          <dd id="kpi-boards">—</dd>
+        </div>
+      </dl>
+    </section>
+
     <section class="dossier" aria-labelledby="dossier-title">
       <div class="dossier-head">
         <div>
@@ -315,6 +386,7 @@
       <div class="card-tail">
         <div class="card-band card-footer-band">
           <div class="governance"></div>
+          <div class="remediation"></div>
           <div class="downloads"></div>
         </div>
 

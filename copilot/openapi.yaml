@@ -1,0 +1,122 @@
+openapi: 3.0.3
+info:
+  title: NextGen DevSecOps Assessment API
+  version: "2.0.0"
+  description: >-
+    Contrato HTTP auditable del evaluador continuo NextGen DevSecOps Assessment
+    para Microsoft Security Copilot, Power BI y flujos de gobernanza humana (REN-001.v2).
+servers:
+  - url: http://127.0.0.1:8050
+    description: Consola local del evaluador DevSecOps
+paths:
+  /api/ecosistema:
+    get:
+      operationId: consultarEstadoEcosistema
+      summary: Devuelve los enlaces del ecosistema DevSecOps y el último dictamen firmado de v1, v2 y v3.
+      responses:
+        "200":
+          description: Estado consolidado del ecosistema y últimas corridas por entrega.
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/metricas-powerbi.json:
+    get:
+      operationId: consultarMetricasContinuas
+      summary: Obtiene KPIs longitudinales de cumplimiento, evidencia verificable, brechas y duración para Power BI y Fabric.
+      responses:
+        "200":
+          description: Resumen ejecutivo e historial tabular de evaluaciones.
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/metricas-powerbi.csv:
+    get:
+      operationId: exportarDatasetPowerBI
+      summary: Exporta el conjunto de datos histórico en CSV UTF-8 listo para Power BI Desktop o Microsoft Fabric OneLake.
+      responses:
+        "200":
+          description: Tabla CSV de corridas DevSecOps.
+          content:
+            text/csv:
+              schema:
+                type: string
+  /api/evaluar:
+    post:
+      operationId: ejecutarEvaluacionEntrega
+      summary: Ejecuta la compilación aislada, pruebas xUnit, agentes QA/SecOps y política determinista sobre una versión.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, modo]
+              properties:
+                version:
+                  type: string
+                  enum: [v1, v2, v3]
+                modo:
+                  type: string
+                  enum: [solo-evidencia, agente]
+      responses:
+        "200":
+          description: Informe determinista y matriz de las 8 etapas DevSecOps.
+  /api/remediacion:
+    post:
+      operationId: generarBorradorRemediacion
+      summary: Genera un borrador de código C# asistido por IA o plantilla determinista para subsanar una brecha sin alterar el dictamen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ejecucion]
+              properties:
+                ejecucion:
+                  type: string
+                  description: ID hexadecimal de 32 caracteres de la corrida evaluada.
+                usar_ia:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Propuesta de parche o prueba xUnit sujeta a reevaluación determinista.
+  /api/acciones:
+    post:
+      operationId: resolverAccionGobernanza
+      summary: Aprueba, descarta o cierra por verificación una tarea idempotente en Azure Boards bajo supervisión humana.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ejecucion, decision]
+              properties:
+                ejecucion:
+                  type: string
+                decision:
+                  type: string
+                  enum: [aprobar, descartar, cerrar, reabrir]
+                nota:
+                  type: string
+      responses:
+        "200":
+          description: Punto de control actualizado y sincronizado con Azure Boards.
+  /api/demo/reiniciar:
+    post:
+      operationId: reiniciarEntornoDemo
+      summary: Archiva de forma reversible las corridas actuales, limpia datos.json locales y opcionalmente reinicia tareas demo en Azure Boards.
+      responses:
+        "200":
+          description: Entorno limpio listo para una nueva sesión de demostración.
+  /api/demo/restaurar:
+    post:
+      operationId: restaurarSesionArchivada
+      summary: Restaura la última sesión archivada tras un reinicio de demostración.
+      responses:
+        "200":
+          description: Corridas y KPIs restaurados íntegramente.

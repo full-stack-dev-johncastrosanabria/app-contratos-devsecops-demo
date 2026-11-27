@@ -161,6 +161,48 @@ Dejá abiertas estas 4 pestañas en una ventana limpia (con zoom al `110%`–`12
 
 ---
 
+## 2.5 Capacidades de las 8 Etapas que podés mostrar en vivo (Cobertura Completa del Loop)
+
+1. **Etapa 1 · Planificar (`Azure Boards`):** Historia `AB#1` con criterios estructurados múltiples (`REN-001` cancelados y `REN-002` ventanas activas idempotentes 30/7/1 días).
+2. **Etapa 2 · Crear código (`GitHub + VS Code + GitHub Copilot`):** Trazabilidad bidireccional `PR #1 ↔ AB#1` y verificación automática de reglas de autoría en `.github/copilot-instructions.md`.
+3. **Etapa 3 · Asegurar desde el origen (`GHAS + CodeQL + Dependabot + SBOM`):** Consulta en vivo de alertas CodeQL, Pull Requests abiertos de Dependabot, Secret Scanning e inventario oficial SPDX SBOM (`/dependency-graph/sbom`).
+4. **Etapa 4 · Integrar y probar (`Azure Pipelines + GitHub Actions + xUnit`):** Matriz multi-criterio (`2/2` en `v1`, `1/2` en `v2` y `v3`), cobertura de escenarios/Cobertura XML y pipelines espejo en `.github/workflows/devsecops.yml` y `azure-pipelines.yml`.
+5. **Etapa 5 · Desplegar (`Azure Container Apps + AKS Ready`):** Verificación de revisión activa/commit en Container Apps más auditoría determinista de 6 controles de endurecimiento Kubernetes en `deploy/aks/` (`runAsNonRoot`, `readOnlyRootFilesystem`, `drop: ALL`, `NetworkPolicy`).
+6. **Etapa 6 · Operar (`Microsoft Defender for Cloud`):** Consulta en vivo del **Secure Score (%)** en Azure Resource Graph, HTTPS exclusivo e identidad administrada `SystemAssigned` habilitada en `ca-appcontratos`.
+7. **Etapa 7 · Observar y aprender (`Azure Monitor + App Insights + Log Analytics + Power BI`):** Comparación KQL reciente (`1h`) vs línea base (`23h previas`) y franja **Valor continuo** con descarga directa de dataset CSV/JSON para **Power BI** y **Microsoft Fabric** (`/api/metricas-powerbi.csv`).
+8. **Etapa 8 · Optimizar con IA (`Fabric + Azure AI Foundry + Microsoft Security Copilot`):**
+   - **Asistente de remediación C#** en cada expediente con brecha (`0 tokens` determinista o generado con `Azure AI Foundry`), con botón de copiado accesible.
+   - **Manifiesto OpenAPI y plugin para Microsoft Security Copilot** (`/copilot/security-copilot-skill.yaml`).
+   - **Gobernanza WIQL idempotente + cierre de ciclo** cuando una entrega alcanza `VERIFICADO`.
+
+---
+
+## 2.6 ENTRE MÚLTIPLES DEMOS (Reinicio 100 % Reversible en 5 segundos)
+
+Todo lo que hagas durante una sesión (evaluaciones, contratos de prueba en `:5080`, aprobaciones, descartes o cierres en Azure Boards) es **completamente reversible** para repetir la demo cuantas veces quieras:
+
+### Opción A — Desde la Consola Web (`http://127.0.0.1:8050`)
+1. **Para repetir una sola aprobación/descarte sin volver a correr `dotnet test`:** dentro de la tarjeta de gobernanza de `v2` o `v3`, hacé doble clic en **«Reabrir para otra demo»**. La tarjeta vuelve a `Pendiente de aprobación` y retira (`Removed`) la tarea previa en Azure Boards para que el próximo clic vuelva a decir *«Tarea creada»*.
+2. **Para dejar toda la sala limpia antes de la siguiente audiencia:** hacé clic arriba a la derecha en **«Reiniciar demo»**:
+   - **Archivar corridas y reiniciar KPIs:** mueve las corridas actuales a `assessment/runs/_archivo_demos/<timestamp>/` (no se pierden).
+   - **Limpiar contratos locales en `:5080`:** elimina los `datos.json` efímeros de `v1`, `v2` y `v3`.
+   - **Reiniciar tareas demo en Azure Boards** *(opcional)*: pasa las tareas `devsecops-fp-*` a estado `Removed` y restaura `AB#1` a su estado canónico.
+3. **¿Querés recuperar la sesión anterior?** Abrí de nuevo **«Reiniciar demo»** y pulsá **«Restaurar última sesión archivada»**.
+
+### Opción B — Desde Terminal (CLI)
+```bash
+# Reinicio local + Azure Boards (archiva corridas, limpia :5080 y retira tareas demo en Boards)
+assessment/.venv/bin/python -m assessment reiniciar-demo --con-boards
+
+# Deshacer el último reinicio y restaurar las corridas archivadas
+assessment/.venv/bin/python -m assessment restaurar-demo
+
+# Reabrir una decisión individual por su ID de ejecución
+assessment/.venv/bin/python -m assessment reabrir --ejecucion <id_32_hex>
+```
+
+---
+
 ## 3. DESPUÉS DE LA DEMO (Cierre Comercial + Apagado Seguro a \$0.00/hora)
 
 ### Paso 3.1 — Cierre comercial sugerido antes de colgar *(30 segundos)*

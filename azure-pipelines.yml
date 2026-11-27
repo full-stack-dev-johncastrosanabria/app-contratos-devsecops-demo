@@ -1,0 +1,62 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: IntegrarYProbar
+    displayName: "Etapa 4 · Evidencia xUnit y política determinista"
+    jobs:
+      - job: EvidenciaXUnit
+        displayName: "Validar pruebas y contrato TRX"
+        strategy:
+          matrix:
+            v1:
+              APP_VERSION: v1
+            v2:
+              APP_VERSION: v2
+            v3:
+              APP_VERSION: v3
+        steps:
+          - checkout: self
+            fetchDepth: 0
+
+          - task: UseDotNet@2
+            displayName: "Instalar .NET SDK 10.0.x"
+            inputs:
+              packageType: sdk
+              version: "10.0.x"
+
+          - task: UsePythonVersion@0
+            displayName: "Usar Python 3.12"
+            inputs:
+              versionSpec: "3.12"
+
+          - script: |
+              python3 -m assessment.ci $(APP_VERSION) $(Build.ArtifactStagingDirectory)/evidencia-$(APP_VERSION)
+            displayName: "Ejecutar xUnit aislado y verificar política REN-001.v2"
+
+          - task: PublishTestResults@2
+            condition: always()
+            displayName: "Publicar resultados TRX en Azure Pipelines"
+            inputs:
+              testResultsFormat: VSTest
+              testResultsFiles: "$(Build.ArtifactStagingDirectory)/evidencia-$(APP_VERSION)/*/resultados.trx"
+              mergeTestResults: false
+              failTaskOnFailedTests: false
+              testRunTitle: "AppContratos · $(APP_VERSION)"
+
+          - task: PublishPipelineArtifact@1
+            condition: always()
+            displayName: "Publicar artefactos firmados (TRX y log)"
+            inputs:
+              targetPath: "$(Build.ArtifactStagingDirectory)/evidencia-$(APP_VERSION)"
+              artifact: "evidencia-$(APP_VERSION)-$(Build.SourceVersion)"
