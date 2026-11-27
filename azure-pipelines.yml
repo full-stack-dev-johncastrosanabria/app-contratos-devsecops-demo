@@ -60,3 +60,13 @@ stages:
             inputs:
               targetPath: "$(Build.ArtifactStagingDirectory)/evidencia-$(APP_VERSION)"
               artifact: "evidencia-$(APP_VERSION)-$(Build.SourceVersion)"
+
+      - job: TrivySonarSecOps
+        displayName: "Etapa 3 · Escaneo Trivy (IaC / Contenedor / SCA)"
+        steps:
+          - checkout: self
+          - script: |
+              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+              trivy config --skip-dirs assessment/.venv,assessment/runs,.git --severity HIGH,MEDIUM,LOW --exit-code 0 .
+              trivy fs --scanners vuln,secret --skip-dirs assessment/.venv,assessment/runs,.git --severity CRITICAL,HIGH --exit-code 0 .
+            displayName: "Auditar Dockerfile, manifiestos AKS y dependencias con Trivy"

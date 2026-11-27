@@ -1719,6 +1719,47 @@ input:disabled {
   flex-wrap: wrap;
 }
 
+.scanner-engines-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-2);
+}
+
+.scanner-card {
+  background-color: var(--surface-tint);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  display: grid;
+  gap: 3px;
+  font-size: var(--text-xs);
+}
+
+.scanner-card strong {
+  color: var(--ink-primary);
+}
+
+.scanner-card span {
+  color: var(--ink-secondary);
+}
+
+.scanner-card a {
+  color: var(--action-primary);
+  font-weight: 600;
+  text-underline-offset: 2px;
+}
+
+.motor-pill {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  background-color: var(--surface-well);
+  color: var(--ink-primary);
+  font-weight: 600;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
 .vuln-table-wrap {
   overflow: auto;
   max-inline-size: 100%;

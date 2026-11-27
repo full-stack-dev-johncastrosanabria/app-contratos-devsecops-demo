@@ -249,8 +249,11 @@ async def investigate_secops(evidence: Evidence, devsecops_data: dict) -> dict:
 
     @tool
     def consultar_seguridad_origen() -> dict:
-        """Consulta alertas de CodeQL, PRs/alertas de Dependabot, Secret Scanning e inventario SBOM SPDX en GitHub."""
-        data = gh.get("seguridad_origen", {"disponible": False})
+        """Consulta alertas de CodeQL, SonarQube Cloud, Dependabot, Secret Scanning e inventario SBOM SPDX."""
+        data = {
+            "github_sec": gh.get("seguridad_origen", {"disponible": False}),
+            "sonarqube": devsecops_data.get("sonarqube", {"disponible": False}),
+        }
         trace.append({"herramienta": "consultar_seguridad_origen"})
         return data
 
@@ -362,6 +365,7 @@ def build_eight_stages(report: dict, devsecops_data: dict) -> list[dict]:
     ci = gh.get("pipeline_ci") or {}
     sec_origin = gh.get("seguridad_origen") or {}
     sec = sec_origin.get("code_scanning") or {}
+    sonar = devsecops_data.get("sonarqube") or {}
     dep = sec_origin.get("dependabot") or {}
     sbom = sec_origin.get("sbom") or {}
     sec_scan = sec_origin.get("secret_scanning") or {}
@@ -534,24 +538,42 @@ def build_eight_stages(report: dict, devsecops_data: dict) -> list[dict]:
             "numero": 3,
             "bloque": "DevSec",
             "etapa": "Asegurar desde el origen",
-            "herramienta": "GHAS · CodeQL · Dependabot",
-            "pregunta": "¿Qué vulnerabilidades SAST, contenedor, IaC y cadena de suministro están abiertas?",
+            "herramienta": "SonarQube · Trivy · CodeQL · Dependabot",
+            "pregunta": "¿Qué vulnerabilidades reportan SonarQube, Trivy, CodeQL y Dependabot sobre la entrega?",
             "estado": stage3_state,
             "resumen": (
-                f"Reporte SecOps: {vuln_open} abiertas · {vuln_mitigated}/{vuln_total} mitigadas · Dependabot ({dep_prs_count or 0} PRs)"
+                f"SecOps: {vuln_open} abiertas · {vuln_mitigated}/{vuln_total} mitigadas"
+                + (f" · Sonar QG {sonar['quality_gate']}" if sonar.get("disponible") else "")
+                + (
+                    f" · Trivy {(vuln_scan.get('trivy') or {}).get('misconfiguraciones_totales', 0)} IaC"
+                    if (vuln_scan.get("trivy") or {}).get("disponible") else ""
+                )
             ),
-            "descripcion": "Audita vulnerabilidades accionables en CI/CD, Dockerfile, Kubernetes AKS y API .NET junto con alertas CodeQL, Dependabot y SBOM.",
+            "descripcion": "Integra Quality Gate y ratings de SonarQube Cloud, escaneo Trivy (IaC/contenedor/SCA), CodeQL, Dependabot y SBOM SPDX.",
             "datos": {
                 "Vulnerabilidades auditadas": f"{vuln_open} abiertas · {vuln_mitigated} mitigadas (de {vuln_total})",
-                "Estado CodeQL": sec.get("estado", "no disponible"),
+                "SonarQube Cloud": (
+                    f"QG {sonar['quality_gate']} · Seg. {sonar['rating_seguridad']} ({sonar['vulnerabilidades']} vuln · {sonar['bugs']} bugs · {sonar['duplicacion_pct']}% dup.)"
+                    if sonar.get("disponible") else "Integrado con GitHub Code Scanning"
+                ),
+                "Trivy (IaC / Contenedor / SCA)": (
+                    f"Activo ({(vuln_scan.get('trivy') or {}).get('misconfiguraciones_totales', 0)} misconfig · "
+                    f"{(vuln_scan.get('trivy') or {}).get('misconfiguraciones_altas', 0)} HIGH · "
+                    f"{(vuln_scan.get('trivy') or {}).get('cves_sca', 0)} CVEs)"
+                    if (vuln_scan.get("trivy") or {}).get("disponible")
+                    else "Definido en pipeline CI/CD (SARIF)"
+                ),
+                "Estado CodeQL": (
+                    f"{sec.get('estado', 'activo')} ({(sec.get('por_herramienta') or {}).get('CodeQL', 0)} alertas CodeQL)"
+                    if sec.get("por_herramienta") is not None else sec.get("estado", "no disponible")
+                ),
                 "Alertas SAST abiertas": str(sec.get("alertas_abiertas", 0)),
                 "Dependabot": dep_label,
-                "Secret Scanning": sec_scan.get("estado", "proteccion_push"),
                 "Inventario SBOM": sbom_label,
                 "Remediación agéntica": "Conectada con Etapa 8 (SecOps IA)",
             },
-            "url": f"{gh['url_repositorio']}/security" if gh.get("url_repositorio") else None,
-            "etiqueta_url": "Abrir alertas de seguridad en GitHub",
+            "url": sonar.get("url") or (f"{gh['url_repositorio']}/security" if gh.get("url_repositorio") else None),
+            "etiqueta_url": "Abrir proyecto en SonarQube Cloud" if sonar.get("url") else "Abrir alertas de seguridad en GitHub",
         },
         {
             "numero": 4,

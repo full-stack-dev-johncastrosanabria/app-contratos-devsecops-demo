@@ -20,7 +20,7 @@ from assessment.analytics import build_powerbi_metrics, render_powerbi_csv
 from assessment.ci import matches_expected
 from assessment.demo_reset import execute_demo_reset, restore_latest_archive
 from assessment.evidence import APP, CRITERION, PROJECT, collect, read_cobertura
-from assessment.integrations import audit_repo_governance, parse_boards_criteria
+from assessment.integrations import audit_repo_governance, fetch_sonarqube_context, parse_boards_criteria
 from assessment.policy import evaluate, evaluate_criteria_matrix, source_tests
 from assessment.powerbi_cloud import _build_executive_pbix, sync_powerbi_cloud
 from assessment.vulnerabilities import (
@@ -606,6 +606,33 @@ class DevSecOpsRegression(unittest.TestCase):
             initial_scan = scan_vulnerabilities(vuln_repo, version="v1", runs_dir=runs_dir)
             self.assertEqual(initial_scan["abiertas"], 4)
             self.assertEqual(initial_scan["mitigadas"], 0)
+            self.assertIn("trivy", initial_scan)
+            self.assertTrue(any(h["id"] == "SEC-DOCKER-001" and "Trivy" in h["motor"] for h in initial_scan["hallazgos"]))
+            if initial_scan["trivy"]["disponible"]:
+                self.assertGreaterEqual(initial_scan["trivy"]["misconfiguraciones_altas"], 1)
+
+            with patch("assessment.integrations._http_json", side_effect=lambda method, url, headers, body=None, timeout=15: (
+                {"projectStatus": {"status": "ERROR"}} if "qualitygates/project_status" in url
+                else {"component": {"measures": [
+                    {"metric": "vulnerabilities", "value": "10"},
+                    {"metric": "bugs", "value": "16"},
+                    {"metric": "code_smells", "value": "145"},
+                    {"metric": "duplicated_lines_density", "value": "10.1"},
+                    {"metric": "ncloc", "value": "13929"},
+                    {"metric": "security_rating", "value": "5.0"},
+                    {"metric": "reliability_rating", "value": "4.0"},
+                    {"metric": "sqale_rating", "value": "1.0"},
+                ]}} if "measures/component" in url
+                else {"issues": [{"rule": "docker:S6471", "type": "VULNERABILITY", "severity": "HIGH", "component": "proj:Dockerfile", "line": 11, "message": "Run as non-root"}]}
+            )):
+                sonar_ctx = fetch_sonarqube_context({"SONAR_PROJECT_KEY": "org_proj"})
+                self.assertTrue(sonar_ctx["disponible"])
+                self.assertEqual(sonar_ctx["quality_gate"], "FALLIDO")
+                self.assertEqual(sonar_ctx["vulnerabilidades"], 10)
+                self.assertEqual(sonar_ctx["rating_seguridad"], "E")
+                self.assertEqual(sonar_ctx["rating_confiabilidad"], "D")
+                self.assertEqual(sonar_ctx["rating_mantenibilidad"], "A")
+                self.assertEqual(sonar_ctx["hallazgos"][0]["archivo"], "Dockerfile")
 
             draft_sec = asyncio.run(generate_vuln_remediation(vuln_repo, runs_dir, "SEC-DOCKER-001", version="v1", use_ai=False))
             self.assertIn("USER $APP_UID", draft_sec["codigo_sugerido"])
@@ -613,6 +640,8 @@ class DevSecOpsRegression(unittest.TestCase):
             mitigated = apply_vuln_remediation(vuln_repo, runs_dir, "TODAS", version="v1")
             self.assertEqual(mitigated["reporte_vulnerabilidades"]["abiertas"], 0)
             self.assertEqual(mitigated["reporte_vulnerabilidades"]["mitigadas"], 4)
+            if mitigated["reporte_vulnerabilidades"]["trivy"]["disponible"]:
+                self.assertEqual(mitigated["reporte_vulnerabilidades"]["trivy"]["misconfiguraciones_altas"], 0)
 
             rev_sec = revert_vuln_remediation(vuln_repo, runs_dir, vuln_id="TODAS", version="v1")
             self.assertEqual(rev_sec["reporte_vulnerabilidades"]["abiertas"], 4)

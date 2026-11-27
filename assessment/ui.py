@@ -16,7 +16,7 @@ import urllib.request
 from .__main__ import ROOT, apply_closure, apply_decision, apply_reopen, assess_project
 from .analytics import build_powerbi_metrics, render_powerbi_csv
 from .demo_reset import execute_demo_reset, list_archived_sessions, restore_latest_archive
-from .integrations import load_settings
+from .integrations import fetch_sonarqube_context, load_settings
 from .powerbi_cloud import get_powerbi_state, sync_powerbi_cloud
 from .remediation import (
     apply_local_remediation,
@@ -151,6 +151,9 @@ def _format_summary(report: dict) -> dict:
     ):
         if optional_key in report:
             summary[optional_key] = report[optional_key]
+    sonar_ctx = (report.get("devsecops") or {}).get("sonarqube")
+    if sonar_ctx:
+        summary["sonarqube"] = sonar_ctx
     summary["resultados_trx"] = [{"outcome": row["outcome"], "name": row.get("name")} for row in report["resultados_trx"]]
     summary["ejecucion"] = {
         key: report["ejecucion"].get(key)
@@ -191,6 +194,10 @@ def ecosystem_links() -> dict:
     proj = s.get("AZURE_DEVOPS_PROJECT", "")
     wi = s.get("AZURE_DEVOPS_WORK_ITEM_ID") or "1"
     gh_repo = s.get("GITHUB_REPO", "")
+    sonar_key = s.get("SONAR_PROJECT_KEY") or (
+        "full-stack-dev-johncastrosanabria_app-contratos-devsecops-demo"
+        if "nextgen-devsecops-assessment" in gh_repo else ""
+    )
     return {
         "boards_url": f"{org}/{proj}/_workitems/edit/{wi}" if org and proj else None,
         "boards_project_url": f"{org}/{proj}/_workitems" if org and proj else None,
@@ -198,6 +205,7 @@ def ecosystem_links() -> dict:
         "github_pr_url": f"https://github.com/{gh_repo}/pull/1" if gh_repo else None,
         "github_actions_url": f"https://github.com/{gh_repo}/actions" if gh_repo else None,
         "github_security_url": f"https://github.com/{gh_repo}/security" if gh_repo else None,
+        "sonarqube_url": f"https://sonarcloud.io/project/overview?id={sonar_key}" if sonar_key else None,
         "powerbi_csv_url": "/api/metricas-powerbi.csv",
         "powerbi_json_url": "/api/metricas-powerbi.json",
         "powerbi_web_url": get_powerbi_state(OUTPUT).get("report_url"),
@@ -279,6 +287,7 @@ class DemoHandler(BaseHTTPRequestHandler):
                     ver: scan_vulnerabilities(ROOT, version=ver, runs_dir=OUTPUT)
                     for ver in ("v1", "v2", "v3")
                 },
+                "sonarqube": fetch_sonarqube_context(load_settings()),
                 "estado_vulnerabilidades": public_vuln_state(OUTPUT),
             })
             return

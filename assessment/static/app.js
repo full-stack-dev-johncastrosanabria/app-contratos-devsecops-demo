@@ -60,9 +60,9 @@ const STAGE_CATALOG = [
     descripcion: "Conecta el commit evaluado con el Pull Request en GitHub, vínculo AB#1 y gobernanza de GitHub Copilot en VS Code.",
   },
   {
-    numero: 3, bloque: "DevSec", etapa: "Asegurar origen", herramienta: "GHAS · CodeQL · Dependabot",
-    pregunta: "¿Qué controles SAST, Secret Scanning, Dependabot y SBOM protegen el código?",
-    descripcion: "Consulta alertas abiertas de CodeQL, Pull Requests de Dependabot, protección de secretos e inventario SPDX SBOM.",
+    numero: 3, bloque: "DevSec", etapa: "Asegurar origen", herramienta: "SonarQube · Trivy · CodeQL · Dependabot",
+    pregunta: "¿Qué vulnerabilidades reportan SonarQube, Trivy, CodeQL y Dependabot sobre la entrega?",
+    descripcion: "Integra Quality Gate y métricas de SonarQube Cloud, escaneo Trivy (IaC/contenedor/SCA), CodeQL, Dependabot y SBOM SPDX.",
   },
   {
     numero: 4, bloque: "DevSec", etapa: "Integrar y probar", herramienta: "Azure Pipelines + Actions + xUnit",
@@ -215,7 +215,7 @@ const TOOL_LABELS = {
   inspeccionar_prueba: "QA · Inspeccionó el código C# y la aserción de la prueba",
   obtener_historia_boards: "QA · Consultó historia y criterios en Azure Boards",
   consultar_cambio_github: "QA · Consultó Pull Request y pipeline en GitHub",
-  consultar_seguridad_origen: "SecOps · Consultó alertas de CodeQL y Dependabot",
+  consultar_seguridad_origen: "SecOps · Consultó SonarQube, CodeQL y Dependabot",
   consultar_despliegue_y_defender: "SecOps · Consultó Container App y Defender CSPM",
   consultar_telemetria_appinsights: "SecOps · Consultó métricas KQL en Application Insights",
 };
@@ -269,6 +269,7 @@ const provenanceByVersion = new Map();
 let cachedLatest = {};
 let activeRemediationState = { parches_locales: {}, prs_efimeros: {} };
 let vulnerabilitiesByVersion = {};
+let sonarCloudCache = null;
 let selectedVulnForStage8 = "SEC-CI-001";
 let activeController = null;
 let filterDiffOnly = false;
@@ -2342,6 +2343,9 @@ function renderGovernance(card, version, runId, action, focusResult = false, clo
 }
 
 function syncVulnPayload(data, currentVer) {
+  if (data.sonarqube) {
+    sonarCloudCache = data.sonarqube;
+  }
   if (data.vulnerabilidades) {
     vulnerabilitiesByVersion = data.vulnerabilidades;
   } else if (data.reporte_vulnerabilidades && currentVer) {
@@ -2350,9 +2354,11 @@ function syncVulnPayload(data, currentVer) {
   if (data.ultimos) {
     cachedLatest = data.ultimos;
     for (const [ver, rep] of Object.entries(data.ultimos)) {
+      if (rep.sonarqube) sonarCloudCache = rep.sonarqube;
       if (reportsByVersion.has(ver)) {
         const current = reportsByVersion.get(ver);
         current.reporte_vulnerabilidades = rep.reporte_vulnerabilidades;
+        if (rep.sonarqube) current.sonarqube = rep.sonarqube;
         if (rep.etapas_devsecops?.length) current.etapas_devsecops = rep.etapas_devsecops;
       }
     }
@@ -2387,13 +2393,53 @@ function renderStage3VulnReport(parent, version) {
   wrapper.setAttribute("aria-labelledby", "vuln-table-caption");
 
   const table = element("table", null, "vuln-table");
-  const caption = element("caption", `Hallazgos SAST, Contenedor, Kubernetes IaC y API en ${version}`);
+  const caption = element("caption", `Hallazgos correlacionados (SonarQube · Trivy · OWASP) en ${version}`);
   caption.id = "vuln-table-caption";
   table.append(caption);
 
+  const curRep = reportsByVersion.get(version);
+  const sonarReport = curRep?.sonarqube || curRep?.devsecops?.sonarqube || sonarCloudCache;
+  const trivyData = vscan.trivy;
+  if (sonarReport?.disponible || trivyData) {
+    const enginesGrid = element("div", null, "scanner-engines-grid");
+    if (sonarReport?.disponible) {
+      const sCard = element("div", null, "scanner-card");
+      sCard.append(
+        element("strong", `SonarQube Cloud · Quality Gate: ${sonarReport.quality_gate}`),
+        element(
+          "span",
+          `Seguridad ${sonarReport.rating_seguridad} (${sonarReport.vulnerabilidades} vuln) · Confiabilidad ${sonarReport.rating_confiabilidad} (${sonarReport.bugs} bugs) · Mantenibilidad ${sonarReport.rating_mantenibilidad} · Dup. ${sonarReport.duplicacion_pct}%`
+        )
+      );
+      if (sonarReport.url) {
+        const sLink = document.createElement("a");
+        sLink.href = sonarReport.url;
+        sLink.target = "_blank";
+        sLink.rel = "noopener";
+        sLink.append(element("span", "Abrir dashboard en SonarCloud"), element("span", " (se abre en una nueva pestaña)", "sr-only"));
+        sCard.append(sLink);
+      }
+      enginesGrid.append(sCard);
+    }
+    if (trivyData) {
+      const tCard = element("div", null, "scanner-card");
+      tCard.append(
+        element("strong", `Aqua Trivy · ${trivyData.disponible ? "Escaneo CLI en vivo" : "Pipeline SARIF"}`),
+        element(
+          "span",
+          trivyData.disponible
+            ? `${trivyData.misconfiguraciones_totales} misconfiguraciones IaC/Docker (${trivyData.misconfiguraciones_altas} HIGH) · ${trivyData.cves_sca} CVEs en paquetes`
+            : trivyData.modo
+        )
+      );
+      enginesGrid.append(tCard);
+    }
+    section.append(enginesGrid);
+  }
+
   const thead = document.createElement("thead");
   const htr = document.createElement("tr");
-  for (const colTitle of ["Vulnerabilidad", "Severidad", "Ubicación", "Estado", "Acción"]) {
+  for (const colTitle of ["Vulnerabilidad / Motor", "Severidad", "Ubicación", "Estado", "Acción"]) {
     const th = element("th", colTitle);
     th.scope = "col";
     htr.append(th);
@@ -2406,8 +2452,13 @@ function renderStage3VulnReport(parent, version) {
     const rowTh = document.createElement("th");
     rowTh.scope = "row";
     const titleWrap = element("div", null, "vuln-row-title");
-    titleWrap.append(
+    const topLine = element("div", null, "scope-tags");
+    topLine.append(
       element("strong", `${item.id} · ${item.categoria}`),
+      element("span", item.motor || "SecOps", "motor-pill")
+    );
+    titleWrap.append(
+      topLine,
       element("span", `${item.titulo} (${item.regla})`)
     );
     rowTh.append(titleWrap);
@@ -3399,8 +3450,22 @@ async function initEcosystem() {
     const data = await readJson(res);
     const eco = data.ecosistema || {};
     cachedLatest = data.ultimos || {};
+    for (const rep of Object.values(cachedLatest)) {
+      if (rep?.sonarqube) sonarCloudCache = rep.sonarqube;
+    }
     if (data.remediacion_activa) activeRemediationState = data.remediacion_activa;
     if (data.vulnerabilidades) vulnerabilitiesByVersion = data.vulnerabilidades;
+    if (!sonarCloudCache) {
+      fetch("/api/vulnerabilidades")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((vdata) => {
+          if (vdata?.sonarqube) {
+            sonarCloudCache = vdata.sonarqube;
+            if (inspectedStage === 3) openStageInspector(3, inspectedVersion, null, { refresh: true });
+          }
+        })
+        .catch(() => {});
+    }
     if (data.analitica) renderValueKpis(data.analitica);
     syncArchiveRestoreButton(data.archivos_demo || []);
 
@@ -3408,6 +3473,7 @@ async function initEcosystem() {
       ["#nav-boards", eco.boards_url],
       ["#nav-pr", eco.github_pr_url],
       ["#nav-sec", eco.github_security_url],
+      ["#nav-sonar", eco.sonarqube_url],
       ["#nav-powerbi", eco.powerbi_web_url || data.powerbi?.report_url],
     ];
     for (const [sel, url] of navMap) {

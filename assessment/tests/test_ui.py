@@ -82,10 +82,13 @@ class DemoHTTP(unittest.TestCase):
                         self.assertEqual(st_pbi, 200)
                         self.assertIn("app.powerbi.com", json.loads(body_pbi)["powerbi"]["report_url"])
 
-                    self.assertEqual(request("GET", "/api/vulnerabilidades")[0], 200)
-                    with (patch("assessment.ui.generate_vuln_remediation", return_value={"disponible": True, "id": "SEC-DOCKER-001", "codigo_sugerido": "USER $APP_UID"}),
+                    with (patch("assessment.ui.fetch_sonarqube_context", return_value={"disponible": True, "quality_gate": "FALLIDO", "vulnerabilidades": 10}),
+                          patch("assessment.ui.generate_vuln_remediation", return_value={"disponible": True, "id": "SEC-DOCKER-001", "codigo_sugerido": "USER $APP_UID"}),
                           patch("assessment.ui.apply_vuln_remediation", return_value={"aplicados": ["Dockerfile"], "reporte_vulnerabilidades": {"abiertas": 3, "mitigadas": 1, "total": 4}}),
                           patch("assessment.ui.revert_vuln_remediation", return_value={"archivos_revertidos": ["Dockerfile"], "reporte_vulnerabilidades": {"abiertas": 4, "mitigadas": 0, "total": 4}})):
+                        st_vuln, body_vuln = request("GET", "/api/vulnerabilidades")
+                        self.assertEqual(st_vuln, 200)
+                        self.assertEqual(json.loads(body_vuln)["sonarqube"]["quality_gate"], "FALLIDO")
                         self.assertEqual(request("POST", "/api/vulnerabilidades/remediar", '{"id":"SEC-DOCKER-001","version":"v1"}', origin)[0], 200)
                         self.assertEqual(request("POST", "/api/vulnerabilidades/aplicar", '{"id":"SEC-DOCKER-001","version":"v1"}', origin)[0], 200)
                         self.assertEqual(request("POST", "/api/vulnerabilidades/revertir", '{"id":"SEC-DOCKER-001","version":"v1"}', origin)[0], 200)

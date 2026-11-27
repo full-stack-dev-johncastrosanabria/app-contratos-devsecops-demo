@@ -70,6 +70,27 @@ jobs:
         with:
           category: "/language:${{ matrix.language }}"
 
+  trivy:
+    name: Escaneo IaC, contenedor y SCA (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ejecutar Trivy sobre sistema de archivos, Dockerfile y manifiestos AKS
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          scanners: "vuln,secret,misconfig"
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "CRITICAL,HIGH,MEDIUM"
+      - name: Publicar SARIF de Trivy en GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: "trivy-results.sarif"
+          category: "/tool:trivy"
+
   publicar-imagen:
     name: Construir imagen OCI (GHCR)
     runs-on: ubuntu-latest

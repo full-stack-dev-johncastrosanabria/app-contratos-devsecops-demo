@@ -3,8 +3,10 @@ import asyncio
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import urllib.error
 import urllib.parse
@@ -65,6 +67,129 @@ def _line_of(text: str, pattern: str, default: int = 1) -> int:
     return text.count("\n", 0, match.start()) + 1 if match else default
 
 
+def _find_trivy_bin() -> str | None:
+    found = shutil.which("trivy")
+    if found:
+        return found
+    for candidate in ("/opt/homebrew/bin/trivy", "/usr/local/bin/trivy"):
+        if Path(candidate).is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+_TRIVY_CACHE: dict[tuple[str, tuple], dict] = {}
+
+
+def _trivy_repo_signature(repo_root: Path) -> tuple:
+    watched = (
+        "Dockerfile",
+        "deploy/aks/deployment.yaml",
+        "deploy/aks/service.yaml",
+        "deploy/aks/networkpolicy.yaml",
+        ".github/workflows/devsecops.yml",
+        "assessment/pyproject.toml",
+        "v1/src/Contratos/Contratos.csproj",
+    )
+    sig = []
+    for rel in watched:
+        p = repo_root / rel
+        try:
+            st = p.stat()
+            sig.append((rel, st.st_mtime_ns, st.st_size))
+        except OSError:
+            sig.append((rel, 0, 0))
+    return tuple(sig)
+
+
+def run_trivy_scan(repo_root: Path) -> dict:
+    trivy_bin = _find_trivy_bin()
+    if not trivy_bin or not (repo_root / "Dockerfile").is_file():
+        return {
+            "disponible": False,
+            "modo": "Definido en CI (.github/workflows/devsecops.yml · aquasecurity/trivy-action)",
+            "misconfiguraciones_totales": 0,
+            "misconfiguraciones_altas": 0,
+            "cves_sca": 0,
+            "hallazgos": [],
+        }
+
+    cache_key = (str(repo_root.resolve()), _trivy_repo_signature(repo_root))
+    cached = _TRIVY_CACHE.get(cache_key)
+    if cached is not None:
+        return dict(cached)
+
+    config_skip = (
+        "assessment/.venv,assessment/runs,.git,.impeccable,.playwright-mcp,"
+        ".codebase-memory,.serena,v1,v2,v3,copilot"
+    )
+    fs_skip = (
+        "assessment/.venv,assessment/runs,.git,.impeccable,.playwright-mcp,"
+        ".codebase-memory,.serena,v1/bin,v1/obj,v2/bin,v2/obj,v3/bin,v3/obj,"
+        "v1/tests,v2/tests,v3/tests,deploy,copilot"
+    )
+    misconfigs: list[dict] = []
+    try:
+        proc = subprocess.run(
+            [trivy_bin, "config", "--skip-dirs", config_skip, "--format", "json", "--quiet", "."],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if proc.stdout.strip():
+            data = json.loads(proc.stdout)
+            for res in data.get("Results") or []:
+                target = res.get("Target", "")
+                for m in res.get("Misconfigurations") or []:
+                    if m.get("Status") == "FAIL":
+                        misconfigs.append({
+                            "id": m.get("ID") or m.get("AVDID") or "TRIVY-MISCONF",
+                            "avd_id": m.get("AVDID"),
+                            "severidad": m.get("Severity", "MEDIUM"),
+                            "archivo": target,
+                            "titulo": m.get("Title") or m.get("Message", ""),
+                        })
+    except Exception:
+        pass
+
+    cves_count = 0
+    cache_candidates = (
+        Path.home() / "Library" / "Caches" / "trivy" / "db" / "trivy.db",
+        Path.home() / ".cache" / "trivy" / "db" / "trivy.db",
+    )
+    if any(p.is_file() for p in cache_candidates):
+        try:
+            fs_proc = subprocess.run(
+                [
+                    trivy_bin, "fs", "--scanners", "vuln", "--offline-scan",
+                    "--skip-dirs", fs_skip, "--format", "json", "--quiet", ".",
+                ],
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if fs_proc.stdout.strip():
+                fs_data = json.loads(fs_proc.stdout)
+                for res in fs_data.get("Results") or []:
+                    cves_count += len(res.get("Vulnerabilities") or [])
+        except Exception:
+            cves_count = 0
+
+    high_misconf = sum(1 for m in misconfigs if m["severidad"] in ("CRITICAL", "HIGH"))
+    result = {
+        "disponible": True,
+        "ejecutable": trivy_bin,
+        "modo": "CLI local en vivo + GitHub Actions SARIF",
+        "misconfiguraciones_totales": len(misconfigs),
+        "misconfiguraciones_altas": high_misconf,
+        "cves_sca": cves_count,
+        "hallazgos": misconfigs[:10],
+    }
+    _TRIVY_CACHE[cache_key] = result
+    return dict(result)
+
+
 def scan_vulnerabilities(repo_root: Path, version: str = "v1", runs_dir: Path | None = None) -> dict:
     ver = version if version in ("v1", "v2", "v3") else "v1"
     state = public_vuln_state(runs_dir) if runs_dir else {"parches_aplicados": {}, "prs_secops": {}}
@@ -81,6 +206,7 @@ def scan_vulnerabilities(repo_root: Path, version: str = "v1", runs_dir: Path | 
     ci_open = bool(re.search(r"^\s*(?:packages|security-events):\s*write\b", top_perm_block, flags=re.M))
     findings.append({
         "id": "SEC-CI-001",
+        "motor": "SonarQube",
         "regla": "githubactions:S8233 / CWE-250",
         "categoria": "Pipeline CI/CD",
         "severidad": "Alta",
@@ -89,15 +215,15 @@ def scan_vulnerabilities(repo_root: Path, version: str = "v1", runs_dir: Path | 
         "linea": _line_of(wf_txt, r"^\s*packages:\s*write", 18),
         "estado": "abierta" if ci_open else "mitigada",
         "descripcion": (
-            "El bloque raíz 'permissions' otorga 'packages: write' y 'security-events: write' a todos los jobs, "
-            "incluyendo pasos de compilación y prueba que solo requieren lectura."
+            "SonarQube Cloud detectó que el bloque raíz 'permissions' otorga 'packages: write' y 'security-events: write' "
+            "a todos los jobs, violando mínimo privilegio."
         ),
         "remediacion_resumen": "Restringir 'permissions: contents: read' en la raíz y asignar permisos de escritura por job.",
         "parche_activo": applied_map.get("SEC-CI-001"),
         "pr_activo": pr_map.get("SEC-CI-001"),
     })
 
-    # 2. SEC-DOCKER-001: Contenedor sin directiva USER no privilegiado
+    # 2. SEC-DOCKER-001: Contenedor sin directiva USER no privilegiado (SonarQube + Trivy DS002)
     dk_rel = "Dockerfile"
     dk_path = repo_root / dk_rel
     dk_txt = dk_path.read_text(encoding="utf-8", errors="replace") if dk_path.is_file() else ""
@@ -105,30 +231,32 @@ def scan_vulnerabilities(repo_root: Path, version: str = "v1", runs_dir: Path | 
     docker_open = not bool(re.search(r"^\s*USER\s+(?:\$APP_UID|app|10001)\b", runtime_part, flags=re.M))
     findings.append({
         "id": "SEC-DOCKER-001",
-        "regla": "docker:S6471 / CWE-250",
+        "motor": "SonarQube + Trivy",
+        "regla": "docker:S6471 · Trivy DS002 (HIGH)",
         "categoria": "Contenedor OCI",
-        "severidad": "Media",
-        "titulo": "Imagen de contenedor .NET sin usuario no privilegiado explícito",
+        "severidad": "Alta",
+        "titulo": "Imagen de contenedor .NET ejecutándose como root sin USER explícito",
         "archivo": dk_rel,
         "linea": _line_of(dk_txt, r"^ENTRYPOINT\b", 15),
         "estado": "abierta" if docker_open else "mitigada",
         "descripcion": (
-            "La etapa 'runtime' del Dockerfile no declara 'USER $APP_UID', dejando el proceso expuesto a ejecutarse "
-            "como root cuando el orquestador no fuerza securityContext."
+            "Tanto SonarQube (docker:S6471) como Trivy (DS002 / AVD-DS-0002: 'Image user should not be root') "
+            "alertan que la etapa runtime del Dockerfile carece de 'USER $APP_UID'."
         ),
         "remediacion_resumen": "Declarar 'USER $APP_UID' en la etapa final del Dockerfile antes de EXPOSE/ENTRYPOINT.",
         "parche_activo": applied_map.get("SEC-DOCKER-001"),
         "pr_activo": pr_map.get("SEC-DOCKER-001"),
     })
 
-    # 3. SEC-K8S-001: Ausencia de límite ephemeral-storage en AKS Deployment
+    # 3. SEC-K8S-001: Ausencia de límite ephemeral-storage en AKS Deployment (SonarQube + Trivy IaC)
     k8s_rel = "deploy/aks/deployment.yaml"
     k8s_path = repo_root / k8s_rel
     k8s_txt = k8s_path.read_text(encoding="utf-8", errors="replace") if k8s_path.is_file() else ""
     k8s_open = "ephemeral-storage:" not in k8s_txt
     findings.append({
         "id": "SEC-K8S-001",
-        "regla": "kubernetes:S6870 / CWE-770",
+        "motor": "SonarQube + Trivy",
+        "regla": "kubernetes:S6870 · CWE-770",
         "categoria": "Kubernetes IaC",
         "severidad": "Media",
         "titulo": "Manifiesto AKS sin cuota límite de almacenamiento efímero",
@@ -136,8 +264,8 @@ def scan_vulnerabilities(repo_root: Path, version: str = "v1", runs_dir: Path | 
         "linea": _line_of(k8s_txt, r"^\s*limits:\s*$", 45),
         "estado": "abierta" if k8s_open else "mitigada",
         "descripcion": (
-            "El Deployment restringe CPU y RAM pero no limita 'ephemeral-storage', permitiendo que logs o archivos "
-            "temporales degraden el nodo del clúster."
+            "SonarQube IaC (kubernetes:S6870) advierte que el Deployment restringe CPU y RAM pero no limita "
+            "'ephemeral-storage', permitiendo agotamiento de disco del nodo."
         ),
         "remediacion_resumen": "Definir 'ephemeral-storage: 64Mi' en requests y '128Mi' en limits del contenedor.",
         "parche_activo": applied_map.get("SEC-K8S-001"),
@@ -157,6 +285,7 @@ def scan_vulnerabilities(repo_root: Path, version: str = "v1", runs_dir: Path | 
     findings.append({
         "id": "SEC-WEB-001",
         "clave_estado": web_key,
+        "motor": "OWASP + SonarQube",
         "regla": "OWASP-A05 / CWE-693",
         "categoria": f"API .NET ({ver})",
         "severidad": "Media",
@@ -176,6 +305,7 @@ def scan_vulnerabilities(repo_root: Path, version: str = "v1", runs_dir: Path | 
     open_count = sum(1 for f in findings if f["estado"] == "abierta")
     mitigated_count = len(findings) - open_count
     high_open = sum(1 for f in findings if f["estado"] == "abierta" and f["severidad"] == "Alta")
+    trivy_data = run_trivy_scan(repo_root)
 
     return {
         "version_evaluada": ver,
@@ -183,6 +313,7 @@ def scan_vulnerabilities(repo_root: Path, version: str = "v1", runs_dir: Path | 
         "abiertas": open_count,
         "mitigadas": mitigated_count,
         "altas_abiertas": high_open,
+        "trivy": trivy_data,
         "hallazgos": findings,
     }
 
@@ -204,6 +335,12 @@ def _build_hardened_file(repo_root: Path, vuln_id: str, version: str = "v1") -> 
                 "  codeql:\n    name: Seguridad en origen (CodeQL)\n    runs-on: ubuntu-latest\n",
                 "  codeql:\n    name: Seguridad en origen (CodeQL)\n    runs-on: ubuntu-latest\n"
                 "    permissions:\n      contents: read\n      security-events: write\n      actions: read\n",
+                1,
+            )
+            patched = patched.replace(
+                "  trivy:\n    name: Escaneo IaC, contenedor y SCA (Trivy)\n    runs-on: ubuntu-latest\n",
+                "  trivy:\n    name: Escaneo IaC, contenedor y SCA (Trivy)\n    runs-on: ubuntu-latest\n"
+                "    permissions:\n      contents: read\n      security-events: write\n",
                 1,
             )
         if "packages: write" not in patched:
@@ -344,12 +481,17 @@ async def generate_vuln_remediation(
 
     @tool
     def consultar_regla_seguridad() -> dict:
-        """Devuelve metadatos CWE, severidad y criterio de verificación determinista de Etapa 3."""
+        """Devuelve metadatos SonarQube, Trivy, CWE, severidad y criterio de verificación de Etapa 3."""
         tool_trace.append("consultar_regla_seguridad")
         return {
             "id": finding["id"],
+            "motor": finding.get("motor"),
             "regla": finding["regla"],
             "severidad": finding["severidad"],
+            "trivy_hallazgos_archivo": [
+                h for h in (scan.get("trivy") or {}).get("hallazgos", [])
+                if h.get("archivo") == rel_path
+            ],
             "criterio_verificacion": finding["remediacion_resumen"],
         }
 

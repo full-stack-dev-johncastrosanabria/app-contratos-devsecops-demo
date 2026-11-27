@@ -35,6 +35,8 @@ def load_settings() -> dict[str, str]:
         "AZURE_RESOURCE_GROUP",
         "AZURE_CONTAINER_APP",
         "AZURE_LOG_ANALYTICS_WORKSPACE_ID",
+        "SONAR_PROJECT_KEY",
+        "SONAR_ORGANIZATION",
     ):
         merged[key] = (os.environ.get(key, file_vals.get(key, "")) or "").strip()
     return merged
@@ -346,19 +348,25 @@ def fetch_github_context(settings: dict[str, str], commit_sha: str | None) -> di
             "code_scanning": {"estado": "no_disponible", "alertas_abiertas": 0, "hallazgos": []},
         }
         try:
-            alerts = _http_json("GET", f"{base}/code-scanning/alerts?state=open&per_page=20", headers)
+            alerts = _http_json("GET", f"{base}/code-scanning/alerts?state=open&per_page=30", headers)
             if isinstance(alerts, list):
+                by_tool: dict[str, int] = {}
+                for a in alerts:
+                    tname = ((a.get("tool") or {}).get("name") or "CodeQL").strip()
+                    by_tool[tname] = by_tool.get(tname, 0) + 1
                 seguridad["code_scanning"] = {
                     "estado": "activo",
                     "alertas_abiertas": len(alerts),
+                    "por_herramienta": by_tool,
                     "hallazgos": [
                         {
+                            "herramienta": ((a.get("tool") or {}).get("name") or "CodeQL"),
                             "regla": (a.get("rule") or {}).get("id"),
                             "severidad": (a.get("rule") or {}).get("security_severity_level") or (a.get("rule") or {}).get("severity"),
                             "archivo": ((a.get("most_recent_instance") or {}).get("location") or {}).get("path"),
                             "url": a.get("html_url"),
                         }
-                        for a in alerts[:5]
+                        for a in alerts[:8]
                     ],
                 }
         except urllib.error.HTTPError as err:
@@ -606,6 +614,82 @@ def find_open_boards_task(settings: dict[str, str], version: str, criterion_id: 
         return None
 
 
+def fetch_sonarqube_context(settings: dict[str, str]) -> dict:
+    project_key = settings.get("SONAR_PROJECT_KEY", "").strip()
+    repo = settings.get("GITHUB_REPO", "").strip()
+    if not project_key and repo:
+        repo_name = repo.split("/")[-1]
+        try:
+            q = urllib.parse.quote(f'query = "{repo_name}"')
+            found = _http_json("GET", f"https://sonarcloud.io/api/components/search_projects?ps=5&filter={q}", {}, timeout=10)
+            comps = (found.get("components") if isinstance(found, dict) else None) or []
+            if comps:
+                project_key = comps[0].get("key", "")
+        except Exception:
+            pass
+        if not project_key and "nextgen-devsecops-assessment" in repo:
+            project_key = "full-stack-dev-johncastrosanabria_app-contratos-devsecops-demo"
+
+    if not project_key:
+        return {"disponible": False, "motivo": "Proyecto SonarQube Cloud no configurado."}
+
+    rating_letters = {"1": "A", "2": "B", "3": "C", "4": "D", "5": "E"}
+    try:
+        key_enc = urllib.parse.quote(project_key)
+        qg_res = _http_json("GET", f"https://sonarcloud.io/api/qualitygates/project_status?projectKey={key_enc}", {}, timeout=10)
+        qg_status = ((qg_res.get("projectStatus") if isinstance(qg_res, dict) else None) or {}).get("status", "UNKNOWN")
+
+        m_keys = "bugs,vulnerabilities,code_smells,security_hotspots,duplicated_lines_density,ncloc,reliability_rating,security_rating,sqale_rating"
+        meas_res = _http_json("GET", f"https://sonarcloud.io/api/measures/component?component={key_enc}&metricKeys={m_keys}", {}, timeout=10)
+        measures_list = (((meas_res.get("component") if isinstance(meas_res, dict) else None) or {}).get("measures")) or []
+        m = {item["metric"]: item.get("value") for item in measures_list if "metric" in item}
+
+        def _letter(raw_val: str | None) -> str:
+            if not raw_val:
+                return "-"
+            head = str(raw_val).split(".")[0]
+            return rating_letters.get(head, str(raw_val))
+
+        issues_res = _http_json(
+            "GET",
+            f"https://sonarcloud.io/api/issues/search?componentKeys={key_enc}&types=VULNERABILITY,BUG&statuses=OPEN&ps=10",
+            {},
+            timeout=10,
+        )
+        raw_issues = (issues_res.get("issues") if isinstance(issues_res, dict) else None) or []
+        issues = [
+            {
+                "regla": i.get("rule"),
+                "tipo": i.get("type"),
+                "severidad": i.get("severity"),
+                "archivo": str(i.get("component") or "").split(":", 1)[-1],
+                "linea": i.get("line"),
+                "mensaje": i.get("message"),
+            }
+            for i in raw_issues[:8]
+        ]
+
+        return {
+            "disponible": True,
+            "proyecto": project_key,
+            "quality_gate": "APROBADO" if qg_status == "OK" else ("FALLIDO" if qg_status == "ERROR" else qg_status),
+            "quality_gate_raw": qg_status,
+            "vulnerabilidades": int(float(m.get("vulnerabilities") or 0)),
+            "bugs": int(float(m.get("bugs") or 0)),
+            "code_smells": int(float(m.get("code_smells") or 0)),
+            "security_hotspots": int(float(m.get("security_hotspots") or 0)),
+            "duplicacion_pct": float(m.get("duplicated_lines_density") or 0.0),
+            "lineas_analizadas": int(float(m.get("ncloc") or 0)),
+            "rating_seguridad": _letter(m.get("security_rating")),
+            "rating_confiabilidad": _letter(m.get("reliability_rating")),
+            "rating_mantenibilidad": _letter(m.get("sqale_rating")),
+            "hallazgos": issues,
+            "url": f"https://sonarcloud.io/project/overview?id={key_enc}",
+        }
+    except Exception as exc:
+        return {"disponible": False, "proyecto": project_key, "motivo": f"SonarQube Cloud no respondió ({type(exc).__name__})."}
+
+
 def collect_devsecops_context(commit_sha: str | None) -> dict:
     settings = load_settings()
     if settings.get("DEVSECOPS_LIVE") == "0":
@@ -618,6 +702,7 @@ def collect_devsecops_context(commit_sha: str | None) -> dict:
         "politica_version": POLICY_VERSION,
         "boards": fetch_boards_story(settings),
         "github": fetch_github_context(settings, commit_sha),
+        "sonarqube": fetch_sonarqube_context(settings),
         "azure": fetch_azure_runtime(settings),
         "gobernanza_repo": audit_repo_governance(REPO_ROOT),
     }
