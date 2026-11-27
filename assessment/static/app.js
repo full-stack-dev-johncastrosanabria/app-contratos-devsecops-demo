@@ -30,10 +30,12 @@ const inspectorNextBtn = document.querySelector("#inspector-next-btn");
 const inspectorCloseBtn = document.querySelector("#inspector-close-btn");
 
 const versions = ["v1", "v2", "v3"];
+// Neutral identity only: the verdict comes from the run, never from the card.
+// Demo scenario each folder was built to represent; shown as intent, never as the verdict.
 const versionRoles = {
-  v1: "Código excluye cancelados · Prueba REN-001 presente",
-  v2: "Regresión funcional en cancelados · Prueba detecta fallo",
-  v3: "Código excluye cancelados · Falta prueba vinculada REN-001",
+  v1: "Escenario: código excluye cancelados · con prueba REN-001",
+  v2: "Escenario: regresión funcional en cancelados",
+  v3: "Escenario: suite en verde sin prueba vinculada a REN-001",
 };
 
 const STAGE_CATALOG = [
@@ -79,13 +81,99 @@ const STAGE_CATALOG = [
   },
 ];
 
+// One vocabulary for every stage state; backend enums never reach the screen.
 const STATE_LABELS = {
   verificado: "Verificado",
   incumplido: "Incumplido",
+  pendiente: "Sin confirmar",
   atencion: "Atención requerida",
-  pendiente: "Pendiente",
-  informativo: "Sin evaluar",
+  informativo: "Informativo",
 };
+
+const STATE_BADGE = {
+  verificado: "pass",
+  incumplido: "fail",
+  pendiente: "pending",
+  atencion: "attention",
+  informativo: "idle",
+};
+
+// Pips carry shape as well as colour (WCAG 1.4.1).
+const PIP_GLYPHS = {
+  verificado: "pass",
+  incumplido: "fail",
+  pendiente: "dots",
+  atencion: "bang",
+  informativo: "dash",
+};
+
+const ENUM_TEXT = {
+  EVIDENCIA_INSUFICIENTE: "Evidencia insuficiente",
+  INCUMPLIDO: "Incumplido",
+  VERIFICADO: "Verificado",
+  PENDIENTE_APROBACION: "Pendiente de aprobación",
+  APROBADA: "Aprobada",
+  DESCARTADA: "Descartada",
+  COMPLETADA: "Completada",
+  SOLO_EVIDENCIA: "Solo evidencia",
+  NO_SOLICITADA: "No solicitada",
+};
+
+function humanize(text) {
+  return String(text ?? "").replace(/\b[A-Z][A-Z_]{4,}\b/g, (m) => ENUM_TEXT[m] || m);
+}
+
+const SCOPE_LABELS = { version: "versión", recurso: "recurso", ambiente: "ambiente" };
+
+// Severity gets its own scale so an "Alta" finding never looks like an informative note.
+function severityLevel(raw) {
+  const v = String(raw || "").toLowerCase();
+  if (v.startsWith("cr") || v === "alta" || v === "high") return "high";
+  if (v === "media" || v === "medium") return "medium";
+  if (v === "baja" || v === "low") return "low";
+  return "info";
+}
+
+function highFindings(report) {
+  return (report?.investigacion_secops?.hallazgos || []).filter((h) => severityLevel(h.severidad) === "high").length;
+}
+
+// "CanceladoNoGeneraAviso" -> "cancelado no genera aviso", for readers who do not read C#.
+const testWords = (name) => name.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+
+// "RenovacionesTests.CanceladoNoGeneraAviso evaluó…" → "La prueba «cancelado no genera aviso» evaluó…"
+function readableReason(text) {
+  const out = String(text || "").replace(/\b[A-Z]\w*Tests\.([A-Z]\w+)\b/g, (_, name) => `la prueba «${testWords(name)}»`);
+  return out.charAt(0).toUpperCase() + out.slice(1);
+}
+
+// Facts an "Informativo" stage should not bury: open SAST alerts, a high 5xx rate with no baseline.
+function stageNote(stage) {
+  const datos = stage?.datos || {};
+  if (stage?.numero === 3) {
+    const open = Number(datos["Alertas SAST abiertas"]);
+    if (open > 0) return `${open} alertas SAST abiertas · fuera del alcance de REN-001: revísalas antes de desplegar.`;
+  }
+  if (stage?.numero === 5 && datos["Versión desplegada"] && datos["Versión evaluada"]) {
+    const deployed = datos["Versión desplegada"];
+    if (deployed !== datos["Versión evaluada"]) return `Desplegada en Azure: ${deployed}, no esta entrega (${datos["Versión evaluada"]}).`;
+    return datos["Cambios locales"] === "Sí"
+      ? `Desplegada en Azure: ${deployed}, pero el repositorio tiene cambios locales sin publicar: no se puede confirmar que sea el mismo código.`
+      : null;
+  }
+  if (stage?.numero === 7) {
+    const pct = Number(String(datos["Errores servidor (5xx)"] || "").match(/([\d.]+)%/)?.[1]);
+    if (pct >= 5) return `Tasa 5xx del ${pct} % sin línea base previa al despliegue: esta corrida no puede responder si empeoró.`;
+  }
+  return null;
+}
+
+// The state already shows as a badge or tag; drop it from the start of a summary.
+const stripState = (text) => humanize(text).replace(/^(Verificado|Incumplido|Evidencia insuficiente|Sin confirmar)\s·\s/, "");
+
+function stageName(numero, fallback) {
+  return STAGE_CATALOG.find((m) => m.numero === numero)?.etapa || fallback;
+}
 
 const STATE_RANK = {
   incumplido: 4,
@@ -170,8 +258,102 @@ let activeController = null;
 let filterDiffOnly = false;
 let inspectedStage = null;
 let inspectedVersion = null;
+let inspectorOrigin = null;
 let lastSandboxAttempt = null;
 let sandboxBusy = false;
+let corridorPrimed = false;
+let escArmedUntil = 0;
+const SHORTCUTS_KEY = "nextgen.atajos";
+let shortcutsEnabled = true;
+try {
+  shortcutsEnabled = localStorage.getItem(SHORTCUTS_KEY) !== "off";
+} catch {
+  // Storage blocked (private mode or site-data policy): keep shortcuts on for this visit.
+}
+let helpOrigin = null;
+let helpReturnY = 0;
+
+const corridorMap = document.querySelector("#corridor-map");
+const runBtnLabel = runBtn.querySelector("span");
+const hubLine = document.querySelector("#hub-line");
+const hubLineDefault = hubLine.textContent;
+const announcer = document.querySelector("#announcer");
+const sharedStagesBand = document.querySelector("#shared-stages");
+const verdictStrip = document.querySelector("#verdict-strip");
+const matrixClose = document.querySelector("#matrix-close");
+const corridorFilterNote = document.querySelector("#corridor-filter-note");
+const shortcutsToggle = document.querySelector("#shortcuts-toggle");
+const sandboxToggle = document.querySelector("#sandbox-toggle");
+const sandboxBar = document.querySelector(".sandbox-bar");
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+const EASE_OUT_EXPO = "cubic-bezier(0.16, 1, 0.3, 1)";
+
+// Restarts a one-shot CSS animation class; the timer outlives the longest keyframe set.
+function replayClass(node, className, durationMs) {
+  node.classList.remove(className);
+  void node.offsetWidth;
+  node.classList.add(className);
+  clearTimeout(node[`_${className}Timer`]);
+  node[`_${className}Timer`] = setTimeout(() => node.classList.remove(className), durationMs);
+}
+
+function animateIn(node, { dx = 0, dy = 4, delay = 0, duration = 240 } = {}) {
+  if (!node.animate) return;
+  const frames = reducedMotion.matches
+    ? [{ opacity: 0.4 }, { opacity: 1 }]
+    : [{ opacity: 0, transform: `translate(${dx}px, ${dy}px)` }, { opacity: 1, transform: "none" }];
+  node.animate(frames, { duration, delay, easing: EASE_OUT_EXPO, fill: "backwards" });
+}
+
+async function readJson(response) {
+  try {
+    return await response.json();
+  } catch {
+    return { error: `El servidor local respondió ${response.status} sin un cuerpo JSON válido.` };
+  }
+}
+
+// fetch() rejects with a TypeError (English, browser-specific text) when the local server is unreachable.
+function describeFetchError(err, fallback) {
+  if (err instanceof TypeError) {
+    return `${fallback} No hay conexión con el servidor local del evaluador: confirma que «python -m assessment.ui» sigue en ejecución y vuelve a intentarlo.`;
+  }
+  return err?.message || fallback;
+}
+
+function setRunning(running) {
+  corridorMap.dataset.running = String(running);
+  runBtn.dataset.busy = String(running);
+  runBtnLabel.textContent = running ? "Evaluando…" : "Ejecutar evaluación";
+  for (const btn of document.querySelectorAll("[data-eval], [data-launch]")) btn.disabled = running;
+  if (!running) {
+    clearInterval(markRunningVersion.timer);
+    delete corridorMap.dataset.runningVersion;
+    hubLine.textContent = hubLineDefault;
+  }
+}
+
+// The corridor names the delivery in flight: its pips pulse and the hub states it.
+function markRunningVersion(version, index, total) {
+  corridorMap.dataset.runningVersion = version;
+  const started = Date.now();
+  const chip = cards.get(version)?.querySelector(".provenance-chip");
+  const tick = () => {
+    const secs = Math.floor((Date.now() - started) / 1000);
+    const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+    hubLine.textContent = `Evaluando ${version} · ${index + 1} de ${total} · ${clock}`;
+    if (chip && cards.get(version).dataset.verdict === "busy") chip.textContent = `Ejecutando ahora · ${clock} · compilación, xUnit${form.elements.modo.value === "agente" ? " y agentes" : ""}`;
+  };
+  clearInterval(markRunningVersion.timer);
+  tick();
+  markRunningVersion.timer = setInterval(tick, 1000);
+}
+
+// Transient confirmations go to a polite screen-reader region; the status banner keeps provenance.
+function announce(message) {
+  announcer.textContent = "";
+  requestAnimationFrame(() => { announcer.textContent = message; });
+}
 
 function svgIcon(kind, size = 14) {
   const ns = "http://www.w3.org/2000/svg";
@@ -197,8 +379,13 @@ function svgIcon(kind, size = 14) {
     ext: ["M6 3.5H3.5v9h9V10", "M9.5 3.5h3v3", "M12.5 3.5 7.5 8.5"],
     play: ["M5 3.5 12.5 8 5 12.5V3.5Z"],
     doc: ["M4 2.5h5.5L12.5 5.5v8H4z", "M9.2 2.5v3.2h3.3"],
+    question: ["M5.9 5.9a2.2 2.2 0 1 1 3.1 2c-.6.3-1 .8-1 1.5v.3", "M8 12.3h.01"],
+    dots: ["M4 8h.01", "M8 8h.01", "M12 8h.01"],
+    bang: ["M8 3.4v5.8", "M8 12.4h.01"],
+    dash: ["M4.4 8h7.2"],
   };
 
+  if (kind === "dots") svg.setAttribute("stroke-width", "3");
   for (const d of paths[kind] || paths.info) {
     const p = document.createElementNS(ns, "path");
     p.setAttribute("d", d);
@@ -210,7 +397,10 @@ function svgIcon(kind, size = 14) {
 function stateToIconKind(state) {
   if (state === "verificado" || state === "pass" || state === "Passed") return "pass";
   if (state === "incumplido" || state === "fail" || state === "error" || state === "Failed") return "fail";
-  if (state === "atencion" || state === "pendiente" || state === "unknown") return "warn";
+  if (state === "pendiente" || state === "pending") return "dots";
+  if (state === "unknown") return "question";
+  if (state === "atencion") return "bang";
+  if (state === "informativo") return "dash";
   return "info";
 }
 
@@ -248,23 +438,41 @@ function formatFieldKey(rawKey) {
 }
 
 function formatFieldValue(key, val) {
-  if (val === null || val === undefined || val === "") return "No registrado";
+  // Python/JSON nulls can arrive serialized as text from the evidence collectors.
+  if (val === null || val === undefined || val === "" || val === "None" || val === "null") return "No registrado";
   if (typeof val === "boolean") return val ? "Sí" : "No";
   if (Array.isArray(val)) return val.length ? val.join(", ") : "Ninguno";
   if (key.endsWith("_pct")) return `${val} %`;
   if (key.endsWith("_ms")) return `${val} ms`;
   if (key.includes("commit") && typeof val === "string" && val.length > 12) return val.slice(0, 10);
-  return String(val);
+  return humanize(val);
 }
 
 async function copyTextWithFeedback(button, text, originalLabel) {
   try {
     await navigator.clipboard.writeText(text);
     const labelSpan = button.querySelector("span") || button;
+    const originalAria = button.getAttribute("aria-label");
+    // Hold the width so "Copiado" does not reflow the governance header.
+    button.style.minInlineSize = `${button.offsetWidth}px`;
     labelSpan.textContent = "Copiado";
-    setTimeout(() => { labelSpan.textContent = originalLabel; }, 1600);
+    button.setAttribute("aria-label", `Copiado: ${text}`);
+    button.querySelector("svg")?.replaceWith(svgIcon("pass", 13));
+    button.classList.add("is-copied");
+    announce(`Copiado: ${text}`);
+    clearTimeout(button._copyTimer);
+    button._copyTimer = setTimeout(() => {
+      labelSpan.textContent = originalLabel;
+      button.setAttribute("aria-label", originalAria);
+      button.querySelector("svg")?.replaceWith(svgIcon("copy", 13));
+      button.classList.remove("is-copied");
+    }, 1600);
   } catch {
-    setStatus(`Valor para copiar: ${text}`, "info");
+    // Keep the value next to the control that failed instead of in an off-screen banner.
+    button.title = text;
+    button.setAttribute("aria-label", `No se pudo copiar. Valor: ${text}`);
+    announce(`El navegador bloqueó el portapapeles. Valor para copiar manualmente: ${text}`);
+    setStatus(`El navegador bloqueó el portapapeles. Valor para copiar manualmente: ${text}`, "info");
   }
 }
 
@@ -308,21 +516,21 @@ function initTransitCorridor() {
     num.setAttribute("aria-hidden", "true");
     titleWrap.append(num, element("span", meta.etapa));
 
-    const srState = element("span", STATE_LABELS.informativo, "sr-only");
+    const srState = element("span", " (sin datos todavía)", "sr-only");
     srState.dataset.role = "sr-state";
-    const iconSlot = element("span", null, "station-icon-slot");
-    iconSlot.append(svgIcon("info", 14));
-    top.append(titleWrap, iconSlot, srState);
+    top.append(titleWrap, srState);
 
     const bottom = element("span", null, "station-bottom");
     const tool = element("span", meta.herramienta, "station-tool");
     const pips = element("span", null, "station-ver-pips");
     pips.setAttribute("aria-hidden", "true");
     for (const ver of versions) {
+      const slot = element("span", null, "ver-slot");
       const pip = element("span", null, "ver-pip");
       pip.dataset.ver = ver;
-      pip.title = `${ver}: sin evaluar`;
-      pips.append(pip);
+      pip.title = `${ver}: sin datos todavía`;
+      slot.append(element("span", ver, "ver-num"), pip);
+      pips.append(slot);
     }
     bottom.append(tool, pips);
 
@@ -331,7 +539,7 @@ function initTransitCorridor() {
       if (inspectedStage === meta.numero && !stageInspector.hidden) {
         closeStageInspector();
       } else {
-        openStageInspector(meta.numero, null);
+        openStageInspector(meta.numero, null, btn);
       }
     });
 
@@ -339,6 +547,31 @@ function initTransitCorridor() {
     stationButtons.set(meta.numero, btn);
     (meta.bloque === "DevSec" ? devsecList : cloudList).append(li);
   }
+  renderLegend();
+}
+
+function setPip(pip, state) {
+  pip.dataset.state = state;
+  pip.replaceChildren(svgIcon(PIP_GLYPHS[state] || "dash", 10));
+}
+
+function renderLegend() {
+  const legend = document.querySelector("#corridor-legend");
+  legend.replaceChildren();
+  for (const state of ["verificado", "incumplido", "pendiente", "atencion", "informativo"]) {
+    const item = element("li", null, "legend-item");
+    const pip = element("span", null, "ver-pip");
+    pip.setAttribute("aria-hidden", "true");
+    setPip(pip, state);
+    item.append(pip, element("span", STATE_LABELS[state]));
+    legend.append(item);
+  }
+  const empty = element("li", null, "legend-item");
+  const hollow = element("span", null, "ver-pip");
+  hollow.setAttribute("aria-hidden", "true");
+  empty.append(hollow, element("span", "Sin datos"));
+  legend.append(empty);
+  for (const pip of document.querySelectorAll("#help-states .ver-pip[data-state]")) setPip(pip, pip.dataset.state);
 }
 
 function updateTransitCorridor() {
@@ -347,25 +580,34 @@ function updateTransitCorridor() {
     if (!btn) continue;
 
     let worstState = "informativo";
+    const perVersion = [];
     for (const ver of versions) {
       const rep = reportsByVersion.get(ver);
       const st = rep?.etapas_devsecops?.find((x) => x.numero === meta.numero)?.estado || "informativo";
       const pip = btn.querySelector(`.ver-pip[data-ver="${ver}"]`);
       if (pip) {
-        pip.dataset.state = st;
-        pip.title = `${ver}: ${STATE_LABELS[st] || st}`;
+        if (rep) setPip(pip, st);
+        pip.title = `${ver}: ${rep ? STATE_LABELS[st] || st : "sin datos todavía"}`;
       }
+      if (rep) perVersion.push([ver, st]);
       if ((STATE_RANK[st] || 0) > (STATE_RANK[worstState] || 0)) {
         worstState = st;
       }
     }
 
+    if (corridorPrimed && btn.dataset.state !== worstState) replayClass(btn, "is-updated", 700);
     btn.dataset.state = worstState;
     btn.setAttribute("aria-expanded", String(!stageInspector.hidden && inspectedStage === meta.numero));
     const srState = btn.querySelector('[data-role="sr-state"]');
-    if (srState) srState.textContent = ` (${STATE_LABELS[worstState] || worstState})`;
-    const iconSlot = btn.querySelector(".station-icon-slot");
-    if (iconSlot) iconSlot.replaceChildren(svgIcon(stateToIconKind(worstState), 14));
+    if (srState) {
+      const distinct = new Set(perVersion.map(([, st]) => st));
+      srState.textContent = !perVersion.length
+        ? " (sin datos todavía)"
+        : distinct.size === 1
+          ? ` (${STATE_LABELS[perVersion[0][1]].toLowerCase()} en ${perVersion.length === 1 ? perVersion[0][0] : "todas las entregas"})`
+          : ` (${perVersion.map(([ver, st]) => `${ver} ${STATE_LABELS[st].toLowerCase()}`).join(", ")})`;
+    }
+
   }
 }
 
@@ -386,25 +628,90 @@ function pickBestVersionForStage(stageNumber, explicitVersion) {
   return chosen || explicitVersion || "v1";
 }
 
-function openStageInspector(stageNumber, focusVersion) {
+// Stage 4 is decided by one test: say which, instead of the generic TRX count.
+function stageAnswer(stage, report) {
+  if (stage.numero === 4 && report) return decidingReason(report);
+  return stripState(stage.resumen || stage.descripcion);
+}
+
+// Long URLs and identifiers break at dots, slashes and dashes, never mid-word.
+const TERMS = {
+  WIQL: "Work Item Query Language: consulta de Azure Boards que evita crear tareas duplicadas",
+  TRX: "Visual Studio Test Results: resultados XML de dotnet test",
+  HITL: "Human in the loop: una persona aprueba o descarta cada acción",
+  "SHA-256": "Huella criptográfica que demuestra que el archivo no cambió",
+  CSPM: "Cloud Security Posture Management: postura de seguridad cloud en Defender",
+  KQL: "Kusto Query Language: consultas de telemetría en Application Insights",
+  SAST: "Análisis estático de seguridad del código fuente (CodeQL)",
+};
+const TERM_PATTERN = new RegExp(`\\b(${Object.keys(TERMS).map((t) => t.replace("-", "\\-")).join("|")})\\b`);
+
+// Text with each known acronym wrapped in <abbr title>, so the definition sits where the term is used.
+function termText(tag, text, className) {
+  const node = element(tag, null, className);
+  for (const part of String(text ?? "").split(TERM_PATTERN)) {
+    if (TERMS[part]) {
+      const abbr = element("abbr", part);
+      abbr.title = TERMS[part];
+      node.append(abbr);
+    } else if (part) {
+      node.append(part);
+    }
+  }
+  return node;
+}
+
+function appendBreakable(node, text) {
+  const str = String(text);
+  if (str.length < 28 || /\s/.test(str)) {
+    node.textContent = str;
+    return;
+  }
+  for (const part of str.split(/(?<=[./_-])/)) {
+    node.append(part, document.createElement("wbr"));
+  }
+}
+
+function openStageInspector(stageNumber, focusVersion, origin = null, { refresh = false } = {}) {
   const baseMeta = STAGE_CATALOG.find((s) => s.numero === stageNumber) || STAGE_CATALOG[0];
+  const wasOpen = !stageInspector.hidden;
+  const previousStage = inspectedStage;
+  const previousVersion = inspectedVersion;
+  const tabHadFocus = inspectorVersionTabs.contains(document.activeElement);
+  if (origin) {
+    inspectorOrigin?.classList.remove("is-inspecting");
+    inspectorOrigin = origin;
+    // Opened from the matrix: dock as a bottom sheet so the row stays in view. From the corridor: inline.
+    stageInspector.dataset.docked = String(Boolean(origin.closest(".results")));
+    placeInspector();
+  } else if (!wasOpen) {
+    stageInspector.dataset.docked = "false";
+    placeInspector();
+  }
   inspectedStage = baseMeta.numero;
   inspectedVersion = pickBestVersionForStage(baseMeta.numero, focusVersion);
 
   const report = reportsByVersion.get(inspectedVersion);
   const liveStage = report?.etapas_devsecops?.find((s) => s.numero === baseMeta.numero) || {};
-  const merged = { ...baseMeta, ...liveStage };
+  const merged = { ...baseMeta, ...liveStage, etapa: baseMeta.etapa };
 
-  stageInspectorTitle.textContent = `Estación ${merged.numero}. ${merged.etapa}`;
-  const stateLabel = STATE_LABELS[merged.estado] || "Referencia de etapa";
-  stageInspectorMeta.textContent = `${merged.bloque} · ${merged.herramienta} · Vista activa: ${inspectedVersion.toUpperCase()} (${stateLabel})`;
+  stageInspectorTitle.textContent = `Etapa ${merged.numero}. ${merged.etapa}`;
+  // The row that opened a docked sheet stays visibly selected.
+  inspectorOrigin?.classList.toggle("is-inspecting", stageInspector.dataset.docked === "true");
+  const stateLabel = merged.estado ? stageStateLabel(merged) : "Referencia de etapa";
+  if (wasOpen && !refresh) {
+    announce(`${inspectorWrapNote}Etapa ${merged.numero}, ${merged.etapa}, ${inspectedVersion}: ${stateLabel}.`);
+  }
+  inspectorWrapNote = "";
+  stageInspectorMeta.textContent = `${merged.bloque} · ${merged.herramienta} · Vista activa: ${inspectedVersion} (${stateLabel})`;
 
   inspectorVersionTabs.replaceChildren();
   for (const ver of versions) {
-    const tab = element("button", ver.toUpperCase(), "ver-tab-btn");
+    const tab = element("button", ver, "ver-tab-btn");
     tab.type = "button";
     tab.setAttribute("aria-pressed", String(ver === inspectedVersion));
     tab.addEventListener("click", () => openStageInspector(baseMeta.numero, ver));
+    if (ver === inspectedVersion) tab.setAttribute("aria-current", "true");
     inspectorVersionTabs.append(tab);
   }
 
@@ -413,24 +720,53 @@ function openStageInspector(stageNumber, focusVersion) {
   const leadGrid = element("div", null, "inspector-lead-grid");
   const qBlock = element("div", null, "inspector-question-block");
   qBlock.append(
-    element("h4", "Pregunta de gobierno que responde esta estación"),
+    element("h4", "Pregunta de gobierno de esta etapa"),
     element("p", merged.pregunta || baseMeta.pregunta)
   );
-  const descBlock = element("p", merged.resumen || merged.descripcion || baseMeta.descripcion, "inspector-desc");
-  leadGrid.append(qBlock, descBlock);
+  const answer = element("div", null, "inspector-answer-block");
+  answer.append(
+    element("h4", report ? `Respuesta en ${inspectedVersion}` : "Qué revisa esta etapa"),
+    element("p", report ? stageAnswer(merged, report) : baseMeta.descripcion, "inspector-desc")
+  );
+  const note = stageNote(merged);
+  if (note) {
+    const noteEl = element("p", null, "stage-note");
+    noteEl.append(svgIcon("bang", 12), element("span", note));
+    answer.append(noteEl);
+  }
+  leadGrid.append(qBlock, answer);
   stageInspectorBody.append(leadGrid);
 
   if (merged.datos && Object.keys(merged.datos).length > 0) {
+    stageInspectorBody.append(element("h4", `Datos recolectados en ${inspectedVersion}`, "inspector-compare-title"));
     const dl = element("dl", null, "inspector-kv");
     for (const [k, v] of Object.entries(merged.datos)) {
       const wrap = element("div", null, "kv-item");
-      wrap.append(element("dt", formatFieldKey(k)), element("dd", formatFieldValue(k, v)));
+      const dd = document.createElement("dd");
+      const value = formatFieldValue(k, v);
+      appendBreakable(dd, value);
+      if (String(value).length > 40) wrap.classList.add("kv-wide");
+      wrap.append(element("dt", formatFieldKey(k)), dd);
       dl.append(wrap);
     }
     stageInspectorBody.append(dl);
   }
 
-  if (reportsByVersion.size > 0) {
+  const loaded = versions.filter((ver) => reportsByVersion.get(ver)?.etapas_devsecops?.some((x) => x.numero === baseMeta.numero));
+  const signatures = new Set(loaded.map((ver) => {
+    const st = reportsByVersion.get(ver).etapas_devsecops.find((x) => x.numero === baseMeta.numero);
+    return stageSignature(st);
+  }));
+  if (loaded.length > 1 && signatures.size === 1) {
+    const st = reportsByVersion.get(loaded[0]).etapas_devsecops.find((x) => x.numero === baseMeta.numero);
+    stageInspectorBody.append(element("h4", `Mismo resultado en ${loaded.join(", ").replace(/, ([^,]*)$/, " y $1")}`, "inspector-compare-title"));
+    const same = element("div", null, "inspector-compare-col inspector-compare-same");
+    const b = element("span", null, "badge");
+    b.dataset.state = STATE_BADGE[st.estado] || "idle";
+    b.append(svgIcon(stateToIconKind(st.estado), 12), element("span", stageStateLabel(st)));
+    same.append(b, element("p", stripState(st.resumen)));
+    stageInspectorBody.append(same);
+  } else if (reportsByVersion.size > 0) {
     stageInspectorBody.append(element("h4", "Estado comparado en las tres entregas", "inspector-compare-title"));
     const grid = element("div", null, "inspector-compare-grid");
     for (const ver of versions) {
@@ -441,10 +777,10 @@ function openStageInspector(stageNumber, focusVersion) {
       headRow.append(element("strong", `Versión ${ver.slice(1)}`));
       if (st) {
         const b = element("span", null, "badge");
-        b.dataset.state = st.estado === "verificado" ? "pass" : (st.estado === "incumplido" ? "fail" : "unknown");
-        b.append(svgIcon(stateToIconKind(st.estado), 12), element("span", STATE_LABELS[st.estado] || st.estado));
+        b.dataset.state = STATE_BADGE[st.estado] || "idle";
+        b.append(svgIcon(stateToIconKind(st.estado), 12), element("span", stageStateLabel(st)));
         headRow.append(b);
-        col.append(headRow, element("p", st.resumen));
+        col.append(headRow, element("p", stageAnswer(st, rep)));
       } else {
         col.append(headRow, element("p", "Sin datos evaluados aún en esta sesión."));
       }
@@ -466,16 +802,72 @@ function openStageInspector(stageNumber, focusVersion) {
     );
     actions.append(ext);
   }
-  const launchBtn = element("button", null, "btn-secondary");
-  launchBtn.type = "button";
-  launchBtn.append(svgIcon("play", 13), element("span", `Iniciar sujeto ${inspectedVersion} en :5080`));
-  launchBtn.addEventListener("click", () => launchSandbox(inspectedVersion));
-  actions.append(launchBtn);
-  stageInspectorBody.append(actions);
+
+  if (actions.childElementCount) stageInspectorBody.append(actions);
 
   stageInspector.hidden = false;
   updateTransitCorridor();
-  stageInspector.focus({ preventScroll: true });
+
+  // Continuity: stepping between stations slides the detail in the travel direction.
+  if (wasOpen && (previousStage !== inspectedStage || previousVersion !== inspectedVersion)) {
+    const forward = previousStage === inspectedStage ? 0 : (inspectedStage > previousStage ? 1 : -1);
+    animateIn(stageInspectorBody, { dx: forward * 14, dy: 0, duration: 260 });
+  }
+
+  // A data refresh repaints in place: no scroll, no focus theft.
+  if (refresh) return;
+  syncHash();
+
+  if (stageInspector.dataset.docked === "true") {
+    const sheetTop = window.innerHeight - stageInspector.getBoundingClientRect().height;
+    const row = inspectorOrigin?.getBoundingClientRect();
+    if (row && (row.bottom > sheetTop - 8 || row.top < 0)) {
+      window.scrollBy({ top: row.top - Math.max(16, (sheetTop - row.height) / 2), behavior: reducedMotion.matches ? "auto" : "smooth" });
+    }
+  } else {
+    const box = stageInspector.getBoundingClientRect();
+    if (box.top < 0 || box.top > window.innerHeight * 0.55) {
+    // Keep the selected station on screen when the map and the inspector heading fit together.
+    const mapTop = corridorMap.getBoundingClientRect().top;
+    const fitsTogether = box.top - mapTop + 180 < window.innerHeight;
+    (fitsTogether ? corridorMap : stageInspector).scrollIntoView({ behavior: reducedMotion.matches ? "auto" : "smooth", block: "start" });
+    }
+  }
+  if (tabHadFocus) {
+    inspectorVersionTabs.querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
+  } else if (!stageInspector.contains(document.activeElement)) {
+    stageInspector.focus({ preventScroll: true });
+  }
+}
+
+// Docked: the sheet follows the matrix in the DOM so Tab order matches what is on screen.
+function placeInspector() {
+  const docked = stageInspector.dataset.docked === "true";
+  const home = docked ? document.querySelector(".results") : corridorMap.parentElement;
+  if (docked && stageInspector.parentElement !== home) home.append(stageInspector);
+  if (!docked && stageInspector.previousElementSibling !== corridorMap) corridorMap.after(stageInspector);
+}
+
+// #etapa=4&version=v2&filtro=brechas makes a view shareable in a review thread.
+function syncHash() {
+  const params = new URLSearchParams();
+  if (!stageInspector.hidden && inspectedStage) {
+    params.set("etapa", String(inspectedStage));
+    params.set("version", inspectedVersion);
+  }
+  if (filterDiffOnly) params.set("filtro", "brechas");
+  const hash = params.toString();
+  history.replaceState(null, "", hash ? `#${hash}` : `${location.pathname}${location.search}`);
+}
+
+function applyHash() {
+  const params = new URLSearchParams(location.hash.slice(1));
+  if (params.get("filtro") === "brechas" && !filterDiffOnly) filterDiffBtn.click();
+  const stage = Number(params.get("etapa"));
+  if (stage >= 1 && stage <= 8) {
+    const ver = versions.includes(params.get("version")) ? params.get("version") : null;
+    openStageInspector(stage, ver);
+  }
 }
 
 function closeStageInspector() {
@@ -483,47 +875,144 @@ function closeStageInspector() {
   stageInspector.hidden = true;
   inspectedStage = null;
   updateTransitCorridor();
-  if (prevStage && stationButtons.has(prevStage)) {
-    stationButtons.get(prevStage).focus({ preventScroll: true });
-  }
+  // After stepping with ←/→ the visitor is "at" the current station, not the first one.
+  if (inspectorOrigin?.classList.contains("station-btn")) inspectorOrigin = stationButtons.get(prevStage);
+  const returnTo = inspectorOrigin && document.contains(inspectorOrigin)
+    ? inspectorOrigin
+    : stationButtons.get(prevStage);
+  inspectorOrigin?.classList.remove("is-inspecting");
+  inspectorOrigin = null;
+  stageInspector.dataset.docked = "false";
+  placeInspector();
+  syncHash();
+  // Returning focus scrolls back to where the visitor came from (a card row or a station).
+  returnTo?.focus();
 }
 
-inspectorPrevBtn.addEventListener("click", () => {
-  const next = inspectedStage && inspectedStage > 1 ? inspectedStage - 1 : 8;
-  openStageInspector(next, inspectedVersion);
-});
+let inspectorWrapNote = "";
 
-inspectorNextBtn.addEventListener("click", () => {
-  const next = inspectedStage && inspectedStage < 8 ? inspectedStage + 1 : 1;
+function stepInspector(delta) {
+  const current = inspectedStage || 1;
+  const loaded = versions.filter((v) => reportsByVersion.has(v));
+  const reviewable = (n) => loaded.some((v) => {
+    const st = reportsByVersion.get(v).etapas_devsecops?.find((x) => x.numero === n);
+    return st && needsReview(st);
+  });
+  let next = current;
+  for (let i = 0; i < 8; i++) {
+    next = ((next - 1 + delta + 8) % 8) + 1;
+    if (!filterDiffOnly || !loaded.length || reviewable(next)) break;
+  }
+  inspectorWrapNote = next < current === delta > 0 ? "Vuelta al inicio del recorrido. " : "";
   openStageInspector(next, inspectedVersion);
-});
+}
+
+inspectorPrevBtn.addEventListener("click", () => stepInspector(-1));
+inspectorNextBtn.addEventListener("click", () => stepInspector(1));
 
 inspectorCloseBtn.addEventListener("click", closeStageInspector);
 
 // Contextual Help Toggle
-function setHelpOpen(open) {
+function setHelpOpen(open, { restore = false } = {}) {
+  if (open && helpDrawer.hidden) {
+    helpOrigin = document.activeElement !== document.body ? document.activeElement : null;
+    helpReturnY = window.scrollY;
+  }
   helpDrawer.hidden = !open;
   helpToggleBtn.setAttribute("aria-expanded", String(open));
-  if (open) helpDrawer.focus({ preventScroll: true });
+  if (open) {
+    helpDrawer.focus({ preventScroll: true });
+  } else if (restore) {
+    // Closing puts the visitor back where they pressed "?".
+    if (helpOrigin && helpOrigin !== helpToggleBtn && document.contains(helpOrigin)) {
+      helpOrigin.focus();
+    } else if (helpOrigin === helpToggleBtn) {
+      helpToggleBtn.focus({ preventScroll: true });
+    } else {
+      window.scrollTo({ top: helpReturnY, behavior: "auto" });
+      helpToggleBtn.focus({ preventScroll: true });
+    }
+    helpOrigin = null;
+  }
 }
 
-helpToggleBtn.addEventListener("click", () => setHelpOpen(helpDrawer.hidden));
-helpCloseBtn.addEventListener("click", () => {
-  setHelpOpen(false);
-  helpToggleBtn.focus({ preventScroll: true });
+helpDrawer.addEventListener("focusout", (event) => {
+  const next = event.relatedTarget;
+  if (!helpDrawer.hidden && next && !helpDrawer.contains(next) && next !== helpToggleBtn) setHelpOpen(false);
 });
 
+shortcutsToggle.checked = shortcutsEnabled;
+shortcutsToggle.addEventListener("change", () => {
+  shortcutsEnabled = shortcutsToggle.checked;
+  try {
+    localStorage.setItem(SHORTCUTS_KEY, shortcutsEnabled ? "on" : "off");
+  } catch {
+    // Preference lasts for this visit only when storage is blocked.
+  }
+  announce(shortcutsEnabled ? "Atajos de una tecla activados." : "Atajos de una tecla desactivados. Esc sigue cerrando paneles.");
+});
+
+helpToggleBtn.addEventListener("click", () => setHelpOpen(helpDrawer.hidden));
+helpCloseBtn.addEventListener("click", () => setHelpOpen(false, { restore: true }));
+
 // Sandbox Bridge (:5080) with popup-blocker resilience & inline retry
+const launchLabel = (ver, active) => (active ? `${ver} activa en :5080` : `Iniciar ${ver} en :5080`);
+
+// Two deliberate clicks within 4 s for anything that stops or replaces a live process.
+function arm(btn, prompt) {
+  const label = btn === runBtn ? runBtnLabel : btn;
+  if (!btn.dataset.label) btn.dataset.label = label.textContent;
+  btn.dataset.armed = "true";
+  label.textContent = prompt;
+  clearTimeout(btn._armTimer);
+  btn._armTimer = setTimeout(() => disarm(btn), 4000);
+}
+
+function disarm(btn) {
+  clearTimeout(btn._armTimer);
+  const label = btn === runBtn ? runBtnLabel : btn;
+  if (btn.dataset.armed === "true" && btn.dataset.label) label.textContent = btn.dataset.label;
+  delete btn.dataset.armed;
+  delete btn.dataset.label;
+}
+
+// Spending Azure AI tokens takes a second, deliberate press; the 0-token engine runs at once.
+function confirmPaidRun(btn, versionsCount, mode = form.elements.modo.value) {
+  if (mode !== "agente" || btn.dataset.armed === "true") {
+    disarm(btn);
+    return true;
+  }
+  arm(btn, `Confirmar: consume tokens en ${versionsCount} ${versionsCount === 1 ? "entrega" : "entregas"}`);
+  announce("La evaluación con agentes consume tokens de Azure AI. Pulsa otra vez para confirmar o elige «Solo evidencia · 0 tokens».");
+  return false;
+}
+
+function requestLaunch(btn, version) {
+  if (sandboxBusy) return;
+  const running = sandboxPill.dataset.active === "true" ? sandboxPill.dataset.version : null;
+  if (running === version) return;
+  if (running && btn.dataset.armed !== "true") {
+    arm(btn, `¿Reemplazar ${running} por ${version}? Pulsa otra vez`);
+    return;
+  }
+  disarm(btn);
+  launchSandbox(version, true);
+}
+
 function updateSandboxBanner(sandbox) {
   const activeVer = sandbox?.activo ? sandbox.version : null;
   sandboxPill.dataset.active = String(Boolean(sandbox?.activo));
+  sandboxPill.dataset.version = activeVer || "";
   delete sandboxPill.dataset.booting;
 
   for (const btn of document.querySelectorAll("[data-launch]")) {
     const ver = btn.dataset.launch;
-    btn.disabled = false;
+    // The running version is a state, not an action: it stays focusable and announced, but does nothing.
+    btn.disabled = Boolean(activeController);
+    btn.setAttribute("aria-disabled", String(activeVer === ver));
     btn.dataset.current = String(activeVer === ver);
-    btn.textContent = activeVer === ver ? `v${ver.slice(1)} activa` : `Iniciar ${ver}`;
+    disarm(btn);
+    btn.textContent = launchLabel(ver, activeVer === ver);
   }
 
   if (sandbox && sandbox.activo) {
@@ -533,6 +1022,7 @@ function updateSandboxBanner(sandbox) {
     sandboxOpenLink.hidden = false;
     stopSandboxBtn.hidden = false;
   } else {
+    disarmStop();
     sandboxText.textContent = "Sandbox local :5080 detenido";
     sandboxOpenLink.hidden = true;
     stopSandboxBtn.hidden = true;
@@ -559,6 +1049,7 @@ async function launchSandbox(version, openTab = true) {
 
   for (const btn of document.querySelectorAll("[data-launch]")) {
     btn.disabled = true;
+    disarm(btn);
     if (btn.dataset.launch === version) btn.textContent = `Iniciando ${version}…`;
   }
 
@@ -570,7 +1061,7 @@ async function launchSandbox(version, openTab = true) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ accion: "iniciar", version }),
     });
-    const data = await res.json();
+    const data = await readJson(res);
     if (!res.ok) throw new Error(data.error || `No se pudo iniciar la instancia ${version} en el puerto 5080.`);
 
     updateSandboxBanner(data.sandbox);
@@ -582,14 +1073,36 @@ async function launchSandbox(version, openTab = true) {
   } catch (err) {
     if (popup && !popup.closed) popup.close();
     updateSandboxBanner(null);
-    setStatus(err.message, "error");
-    showSandboxError(`${err.message} Verifica que .NET SDK 10 esté disponible y el puerto 5080 no esté bloqueado.`, () => launchSandbox(version, openTab));
+    const message = describeFetchError(err, `No se pudo iniciar la instancia ${version} en el puerto 5080.`);
+    setStatus(message, "error");
+    showSandboxError(
+      err instanceof TypeError ? message : `${message} Verifica que .NET SDK 10 esté disponible y que el puerto 5080 no esté ocupado por otro proceso.`,
+      () => launchSandbox(version, openTab)
+    );
   } finally {
     sandboxBusy = false;
   }
 }
 
-stopSandboxBtn.addEventListener("click", async () => {
+const disarmStop = () => disarm(stopSandboxBtn);
+
+stopSandboxBtn.addEventListener("click", () => {
+  if (sandboxBusy) return;
+  if (stopSandboxBtn.dataset.armed !== "true") {
+    arm(stopSandboxBtn, "¿Detener :5080? Pulsa otra vez");
+    return;
+  }
+  disarm(stopSandboxBtn);
+  stopSandbox();
+});
+
+sandboxToggle.addEventListener("click", () => {
+  const open = sandboxBar.dataset.open !== "true";
+  sandboxBar.dataset.open = String(open);
+  sandboxToggle.setAttribute("aria-expanded", String(open));
+});
+
+async function stopSandbox() {
   if (sandboxBusy) return;
   sandboxBusy = true;
   stopSandboxBtn.disabled = true;
@@ -600,21 +1113,22 @@ stopSandboxBtn.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ accion: "detener" }),
     });
-    const data = await res.json();
+    const data = await readJson(res);
     if (!res.ok) throw new Error(data.error || "No se pudo detener la instancia local.");
     updateSandboxBanner(data.sandbox);
     setStatus("Instancia local en 127.0.0.1:5080 detenida.", "idle");
   } catch (err) {
-    setStatus(err.message, "error");
-    showSandboxError(err.message, () => stopSandboxBtn.click());
+    const message = describeFetchError(err, "No se pudo detener la instancia local en el puerto 5080.");
+    setStatus(message, "error");
+    showSandboxError(message, stopSandbox);
   } finally {
     stopSandboxBtn.disabled = false;
     sandboxBusy = false;
   }
-});
+}
 
 for (const btn of document.querySelectorAll("[data-launch]")) {
-  btn.addEventListener("click", () => launchSandbox(btn.dataset.launch, true));
+  btn.addEventListener("click", () => requestLaunch(btn, btn.dataset.launch));
 }
 
 // Initialize 3 Comparison Columns
@@ -626,27 +1140,31 @@ for (const version of versions) {
   const h3 = card.querySelector(".card-version-title");
   h3.id = titleId;
   h3.textContent = `Versión ${version.slice(1)}`;
+  h3.tabIndex = -1;
   card.querySelector(".version-role").textContent = versionRoles[version];
   renderCardQuickActions(card, version);
   cards.set(version, card);
   results.append(card);
 }
 
+// The paid action names the engine it will spend.
+function evalLabel(version) {
+  return `Evaluar ${version} · ${form.elements.modo.value === "agente" ? "agentes" : "0 tokens"}`;
+}
+
 function renderCardQuickActions(card, version) {
   const box = card.querySelector(".card-quick-actions");
   box.replaceChildren();
 
-  const evalSingleBtn = element("button", `Evaluar ${version}`, "btn-ghost");
+  const evalSingleBtn = element("button", evalLabel(version), "btn-ghost card-eval-btn");
   evalSingleBtn.type = "button";
+  evalSingleBtn.dataset.eval = version;
   evalSingleBtn.addEventListener("click", () => {
-    if (!activeController) executeAssessment([version], form.elements.modo.value, { preserveVisible: true });
+    if (activeController || !confirmPaidRun(evalSingleBtn, 1)) return;
+    executeAssessment([version], form.elements.modo.value, { preserveVisible: true });
   });
 
-  const sandboxBtn = element("button", `Probar ${version} (:5080)`, "btn-ghost");
-  sandboxBtn.type = "button";
-  sandboxBtn.addEventListener("click", () => launchSandbox(version, true));
-
-  box.append(evalSingleBtn, sandboxBtn);
+  box.append(evalSingleBtn);
 }
 
 function setBadge(badge, state, labelText) {
@@ -654,7 +1172,22 @@ function setBadge(badge, state, labelText) {
   badge.replaceChildren(svgIcon(stateToIconKind(state), 13), element("span", labelText));
 }
 
+// Running again over a finished card: keep its evidence, say it is the previous run, lock its decisions.
+function holdCard(card, state, label, reasonText, provenanceText) {
+  card.dataset.verdict = state;
+  card.dataset.stale = "true";
+  setBadge(card.querySelector(".badge"), state, label);
+  const prov = card.querySelector(".provenance-chip");
+  prov.dataset.live = "false";
+  prov.textContent = provenanceText;
+  card.querySelector(".reason").textContent = `${reasonText} Debajo sigue la corrida anterior hasta que termine.`;
+  card.querySelector(".card-alert").hidden = true;
+  card.querySelector(".card-footer-band").inert = true;
+}
+
 function resetCardBands(card, state, label, reasonText, provenanceText = "Pendiente de corrida", isLive = false) {
+  delete card.dataset.stale;
+  card.querySelector(".card-footer-band").inert = false;
   card.dataset.verdict = state;
   setBadge(card.querySelector(".badge"), state, label);
 
@@ -662,7 +1195,7 @@ function resetCardBands(card, state, label, reasonText, provenanceText = "Pendie
   prov.dataset.live = String(isLive);
   prov.textContent = provenanceText;
 
-  card.querySelector(".reason").textContent = reasonText;
+  card.querySelector(".reason").textContent = readableReason(reasonText);
   const nextStep = card.querySelector(".next-step");
   nextStep.hidden = true;
   nextStep.textContent = "";
@@ -688,10 +1221,10 @@ function renderDeterministicProof(card, report) {
   const metaStrip = element("div", null, "proof-meta-strip");
   const commit = report.ejecucion?.commit;
   if (commit) {
-    metaStrip.append(createCopyButton(commit, `commit ${commit.slice(0, 8)}`, `Copiar hash de commit de ${report.ejecucion?.version || "entrega"}`));
+    metaStrip.append(createCopyButton(commit, `commit ${commit.slice(0, 8)}`, `commit ${commit.slice(0, 8)}: copiar hash completo de ${report.ejecucion?.version || "la entrega"}`));
   }
   if (typeof report.ejecucion?.archivos_firmados === "number" && report.ejecucion.archivos_firmados > 0) {
-    metaStrip.append(element("span", `${report.ejecucion.archivos_firmados} archivos SHA-256`, "meta-pill"));
+    metaStrip.append(termText("span", `${report.ejecucion.archivos_firmados} archivos firmados con SHA-256`, "meta-pill"));
   }
   band.append(head);
   if (metaStrip.childElementCount) band.append(metaStrip);
@@ -712,8 +1245,12 @@ function renderDeterministicProof(card, report) {
     });
     band.append(element("p", `Suite xUnit ejecutada: ${summaryParts.join(" · ")}`, "source-ref-line"));
 
+    const baseOf = (row) => ((row.name || "").split(".").pop() || "").split("(")[0];
+    const shown = trxRows.filter((row) => linkedMethods.has(baseOf(row)) || row.outcome === "Failed");
+    const folded = trxRows.filter((row) => !shown.includes(row));
+    const trxList = (rows) => {
     const ul = element("ul", null, "trx-list");
-    for (const row of trxRows) {
+    for (const row of rows) {
       const li = element("li", null, "trx-row");
       li.dataset.outcome = row.outcome || "Unknown";
       const rawName = row.name || "Caso de prueba xUnit";
@@ -731,7 +1268,20 @@ function renderDeterministicProof(card, report) {
       }
       ul.append(li);
     }
-    band.append(ul);
+    return ul;
+    };
+    if (shown.length) band.append(trxList(shown));
+    if (folded.length) {
+      const more = document.createElement("details");
+      more.className = "trx-more";
+      more.append(createSummary(shown.length
+        ? `+${folded.length} ${folded.length === 1 ? "prueba aprobada" : "pruebas aprobadas"} sin vínculo REN-001`
+        : `${folded.length} ${folded.length === 1 ? "prueba" : "pruebas"} sin vínculo REN-001`));
+      const body = element("div", null, "detail-content");
+      body.append(trxList(folded));
+      more.append(body);
+      band.append(more);
+    }
   }
 
   for (const ref of linkedRefs) {
@@ -742,48 +1292,275 @@ function renderDeterministicProof(card, report) {
   }
 }
 
-function renderStages(container, stages, version) {
+function stageRowButton(s, version) {
+  const btn = element("button", null, "stage-row-btn");
+  btn.type = "button";
+  btn.dataset.state = s.estado;
+  btn.dataset.stage = String(s.numero);
+
+  const head = element("div", null, "stage-head");
+  const left = element("span", null, "summary-label");
+  left.append(
+    svgIcon(stateToIconKind(s.estado), 13),
+    element("span", `${s.numero}. ${stageName(s.numero, s.etapa)}`)
+  );
+  const note = stageNote(s);
+  const tag = element("span", stageStateLabel(s), "stage-state-tag");
+  if (note && s.estado === "informativo") btn.dataset.flagged = "true";
+  head.append(left, tag);
+  btn.append(head, termText("span", stripState(s.resumen), "stage-desc"));
+  if (note) {
+    const noteEl = element("span", null, "stage-note");
+    noteEl.append(svgIcon("bang", 12), element("span", note));
+    btn.append(noteEl);
+  }
+  btn.addEventListener("click", () => openStageInspector(s.numero, version, btn));
+  return btn;
+}
+
+// One label and one identity per stage result, shared by matrix rows, the shared band and the inspector.
+function stageStateLabel(s) {
+  const base = STATE_LABELS[s.estado] || s.estado;
+  if (s.estado !== "informativo" || !stageNote(s)) return base;
+  return `${base}${s.numero === 7 ? " · sin línea base" : " · por revisar"}`;
+}
+const stageSignature = (s) => `${s.estado}|${s.resumen}|${JSON.stringify(s.datos || {})}|${stageNote(s) || ""}`;
+
+const isGapState = (estado) => ["incumplido", "atencion", "pendiente"].includes(estado);
+// "Solo brechas" keeps what someone must look at: gaps plus informative stages that carry a warning.
+const needsReview = (s) => isGapState(s.estado) || (s.estado === "informativo" && Boolean(stageNote(s)));
+
+function renderStages(container, stages, version, shared = new Set()) {
   container.replaceChildren();
   if (!stages || !stages.length) return;
 
-  const nonPassing = stages.filter((s) => s.estado !== "verificado");
-  const visibleStages = filterDiffOnly ? nonPassing : stages;
+  // Stages identical in every compared delivery live once in the shared band above the cards.
+  const own = stages.filter((s) => !shared.has(s.numero));
+  const gaps = own.filter((s) => isGapState(s.estado));
+  const verified = own.filter((s) => s.estado === "verificado");
+  const informative = own.filter((s) => !isGapState(s.estado) && s.estado !== "verificado");
+  const rowStages = filterDiffOnly
+    ? own.filter(needsReview).sort((a, b) => a.numero - b.numero)
+    : [...gaps, ...informative].sort((a, b) => a.numero - b.numero);
+
+  const parts = [];
+  for (const [estado, one, many] of [
+    ["incumplido", "incumplida", "incumplidas"],
+    ["pendiente", "sin confirmar", "sin confirmar"],
+    ["atencion", "con atención requerida", "con atención requerida"],
+  ]) {
+    const n = gaps.filter((s) => s.estado === estado).length;
+    if (n) parts.push(`${n} ${n === 1 ? one : many}`);
+  }
+  if (verified.length) parts.push(`${verified.length} ${verified.length === 1 ? "verificada" : "verificadas"}`);
+  if (informative.length) parts.push(`${informative.length} ${informative.length === 1 ? "informativa" : "informativas"}`);
+  if (shared.size) parts.push(`${shared.size} comunes en la banda superior`);
 
   const details = document.createElement("details");
-  details.open = filterDiffOnly || nonPassing.length > 0;
-  const summaryLabel = nonPassing.length
-    ? `Etapas DevSecOps · ${nonPassing.length} con atención de ${stages.length}`
-    : `Etapas DevSecOps · ${stages.length} verificadas`;
-  details.append(createSummary(summaryLabel));
+  details.open = filterDiffOnly || gaps.length > 0 || own.length <= 3;
+  const hiddenByFilter = filterDiffOnly ? own.length - rowStages.length : 0;
+  const summaryText = `${stages.length} etapas · ${parts.join(" · ")}${filterDiffOnly ? ` · filtro «Solo brechas»: ${hiddenByFilter} ${hiddenByFilter === 1 ? "oculta" : "ocultas"}` : ""}`;
+  details.append(createSummary(summaryText));
 
   const body = element("div", null, "detail-content");
-  if (!visibleStages.length) {
-    body.append(element("p", "Sin brechas en esta entrega: las 8 etapas están verificadas.", "stage-filter-empty"));
+  if (!rowStages.length) {
+    body.append(element(
+      "p",
+      shared.size
+        ? "Sin brechas propias de esta entrega. Las etapas comunes se muestran una sola vez sobre la matriz."
+        : "Sin brechas en esta entrega: ninguna etapa está incumplida ni requiere atención.",
+      "stage-filter-empty"
+    ));
   } else {
     const list = element("ol", null, "stage-list");
-    for (const s of visibleStages) {
+    for (const s of rowStages) {
       const li = document.createElement("li");
-      const btn = element("button", null, "stage-row-btn");
-      btn.type = "button";
-      btn.dataset.state = s.estado;
-
-      const head = element("div", null, "stage-head");
-      const left = element("span", null, "summary-label");
-      left.append(
-        svgIcon(stateToIconKind(s.estado), 13),
-        element("span", `${s.numero}. ${s.etapa}`),
-        element("span", ` (${STATE_LABELS[s.estado] || s.estado})`, "sr-only")
-      );
-      head.append(left, element("span", s.herramienta, "stage-tool-tag"));
-      btn.append(head, element("span", s.resumen, "stage-desc"));
-      btn.addEventListener("click", () => openStageInspector(s.numero, version));
-      li.append(btn);
+      li.append(stageRowButton(s, version));
       list.append(li);
     }
     body.append(list);
   }
+
+  if (!filterDiffOnly && verified.length) {
+    const strip = element("div", null, "stage-pass-strip");
+    const label = element("p", null, "stage-pass-label");
+    label.append(svgIcon("pass", 13), element("span", `Etapas verificadas (${verified.length})`));
+    const chips = element("ul", null, "stage-pass-chips");
+    for (const s of verified) {
+      const li = document.createElement("li");
+      const chip = element("button", null, "stage-chip");
+      chip.type = "button";
+      chip.dataset.stage = String(s.numero);
+      chip.setAttribute("aria-label", `Etapa ${s.numero}, ${stageName(s.numero, s.etapa)}: verificada. Abrir en el inspector`);
+      chip.append(element("span", `${s.numero} · ${stageName(s.numero, s.etapa)}`));
+      chip.addEventListener("click", () => openStageInspector(s.numero, version, chip));
+      li.append(chip);
+      chips.append(li);
+    }
+    strip.append(label, chips);
+    body.append(strip);
+  }
+
   details.append(body);
   container.append(details);
+}
+
+// Only cards that are visible and hold a finished verdict take part in the comparison.
+function finishedVersions() {
+  return versions.filter((v) => {
+    const card = cards.get(v);
+    return card && !card.hidden && reportsByVersion.has(v)
+      && (["pass", "fail", "unknown"].includes(card.dataset.verdict) || card.dataset.stale === "true");
+  });
+}
+
+function computeSharedStages(vers) {
+  const shared = new Set();
+  if (vers.length < 2) return shared;
+  for (const meta of STAGE_CATALOG) {
+    const signatures = new Set(vers.map((v) => {
+      const s = reportsByVersion.get(v).etapas_devsecops?.find((x) => x.numero === meta.numero);
+      return s ? stageSignature(s) : null;
+    }));
+    if (signatures.size === 1 && !signatures.has(null)) shared.add(meta.numero);
+  }
+  return shared;
+}
+
+function renderSharedStages(vers, shared) {
+  sharedStagesBand.replaceChildren();
+  const sample = vers.length ? reportsByVersion.get(vers[0]).etapas_devsecops || [] : [];
+  const rows = sample
+    .filter((s) => shared.has(s.numero) && (!filterDiffOnly || needsReview(s)))
+    .sort((a, b) => a.numero - b.numero);
+  sharedStagesBand.hidden = shared.size === 0;
+  if (!shared.size) return;
+
+  const head = element("div", null, "shared-stages-head");
+  head.append(
+    element("h3", vers.length === 3 ? "Comunes a las tres entregas" : `Comunes a ${vers.join(" y ")}`),
+    element("p", "Mismo historial, repositorio, recurso y ambiente cloud: el resultado no cambia entre entregas.", "shared-stages-sub")
+  );
+  sharedStagesBand.append(head);
+  const hiddenShared = shared.size - rows.length;
+  if (filterDiffOnly && hiddenShared) {
+    head.append(element("p", `Filtro «Solo brechas»: ${hiddenShared} ${hiddenShared === 1 ? "etapa común sin brecha oculta" : "etapas comunes sin brecha ocultas"}.`, "filter-note"));
+  }
+
+  if (!rows.length) {
+    sharedStagesBand.append(element("p", "Ninguna etapa común tiene brechas.", "stage-filter-empty"));
+    return;
+  }
+  const list = element("ol", null, "shared-stage-list");
+  list.dataset.count = String(rows.length);
+  for (const s of rows) {
+    const li = document.createElement("li");
+    li.append(stageRowButton(s, null));
+    list.append(li);
+  }
+  sharedStagesBand.append(list);
+}
+
+function refreshStageViews() {
+  const vers = finishedVersions();
+  const shared = computeSharedStages(vers);
+  for (const v of vers) {
+    renderStages(cards.get(v).querySelector(".stages"), reportsByVersion.get(v).etapas_devsecops, v, shared);
+  }
+  renderSharedStages(vers, shared);
+  renderVerdictStrip();
+}
+
+// Deterministic deciding reason: outcome of the TRX row linked to REN-001, if any.
+function decidingReason(report) {
+  const linked = new Set((report.referencias || []).map((r) => (r.metodo || "").split(".").pop()).filter(Boolean));
+  const rows = (report.resultados_trx || []).filter((row) => linked.has((row.name || "").split(".").pop().split("(")[0]));
+  if (rows.length) {
+    const row = rows.find((r) => r.outcome === "Failed") || rows[0];
+    const name = row.name.split(".").pop().split("(")[0];
+    const outcome = row.outcome === "Passed" ? "aprobada" : row.outcome === "Failed" ? "fallida" : "sin ejecutar";
+    return `Prueba «${testWords(name)}»: ${outcome}`;
+  }
+  if (report.veredicto === "EVIDENCIA_INSUFICIENTE") return "Ninguna prueba vinculada a REN-001";
+  return humanize(report.justificacion || "").split(". ")[0];
+}
+
+function renderVerdictStrip() {
+  const list = verdictStrip.querySelector("ol");
+  const headline = verdictStrip.querySelector(".verdict-headline");
+  list.replaceChildren();
+  // Every visible delivery that has been touched gets a chip, including "Cancelada" and "No evaluada".
+  const shown = versions.filter((v) => !cards.get(v).hidden && cards.get(v).querySelector(".badge").textContent !== "Sin ejecutar");
+  verdictStrip.hidden = shown.length === 0;
+  if (!shown.length) return;
+
+  let gaps = 0;
+  let pendingActions = 0;
+  for (const v of shown) {
+    const card = cards.get(v);
+    const report = reportsByVersion.get(v);
+    const finished = ["pass", "fail", "unknown"].includes(card.dataset.verdict);
+    if (finished && report.veredicto !== "VERIFICADO") gaps++;
+    if (finished && report.accion_propuesta?.estado === "PENDIENTE_APROBACION") pendingActions++;
+
+    const li = document.createElement("li");
+    const btn = element("button", null, "verdict-chip");
+    btn.type = "button";
+    btn.dataset.state = card.dataset.verdict;
+    const badge = card.querySelector(".badge");
+    const why = element("span", finished ? decidingReason(report) : card.querySelector(".reason").textContent, "verdict-why");
+    btn.append(
+      element("span", v, "verdict-ver"),
+      svgIcon(stateToIconKind(card.dataset.verdict), 14),
+      element("strong", badge.textContent),
+      why
+    );
+    btn.setAttribute("aria-label", `${v}: REN-001 ${badge.textContent.toLowerCase()}. ${why.textContent}. Ir a la tarjeta`);
+    btn.addEventListener("click", () => {
+      card.scrollIntoView({ behavior: reducedMotion.matches ? "auto" : "smooth", block: "start" });
+      card.querySelector(".card-version-title").focus({ preventScroll: true });
+    });
+    li.append(btn);
+    list.append(li);
+  }
+  const finishedVers = shown.filter((v) => ["pass", "fail", "unknown"].includes(cards.get(v).dataset.verdict));
+  const finishedCount = finishedVers.length;
+  const liveCount = finishedVers.filter((v) => provenanceByVersion.get(v)?.isLive).length;
+  const provenance = liveCount === finishedCount
+    ? "resultados en vivo"
+    : liveCount === 0 ? "corridas en caché (0 tokens)" : "resultados en vivo y en caché";
+  headline.textContent = finishedCount
+    ? `Dictamen REN-001: ${gaps} de ${finishedCount} ${finishedCount === 1 ? "entrega" : "entregas"} con brecha${pendingActions ? ` · ${pendingActions} ${pendingActions === 1 ? "acción espera" : "acciones esperan"} revisión humana` : ""}${shown.length > finishedCount ? ` · ${shown.length - finishedCount} sin dictamen` : ""} · ${provenance}`
+    : "Evaluación en curso";
+  renderMatrixClose(finishedVers);
+}
+
+function renderMatrixClose(finishedVers) {
+  matrixClose.replaceChildren();
+  matrixClose.hidden = !finishedVers.length || Boolean(activeController);
+  if (matrixClose.hidden) return;
+  const certified = finishedVers.filter((v) => reportsByVersion.get(v).veredicto === "VERIFICADO");
+  const pending = finishedVers.filter((v) => reportsByVersion.get(v).accion_propuesta?.estado === "PENDIENTE_APROBACION");
+  const join = (list) => list.join(list.length === 2 ? " y " : ", ");
+  matrixClose.append(element("p", [
+    certified.length
+      ? `${join(certified)} ${certified.length === 1 ? "queda certificada" : "quedan certificadas"} para REN-001.`
+      : "Ninguna entrega queda certificada para REN-001.",
+    pending.length ? `Siguiente paso: decidir ${pending.length === 1 ? "la acción propuesta" : `las ${pending.length} acciones propuestas`} en Azure Boards.` : "No queda ninguna decisión pendiente en Azure Boards.",
+  ].join(" "), "matrix-close-text"));
+  if (!pending.length) return;
+  const jumps = element("div", null, "matrix-close-jumps");
+  for (const v of pending) {
+    const btn = element("button", `Revisar acción de ${v}`, "btn-secondary");
+    btn.type = "button";
+    btn.addEventListener("click", () => {
+      const gov = cards.get(v).querySelector(".governance");
+      gov.scrollIntoView({ behavior: reducedMotion.matches ? "auto" : "smooth", block: "center" });
+      (gov.querySelector(".btn-approve") || gov.querySelector("button:not([hidden])"))?.focus({ preventScroll: true });
+    });
+    jumps.append(btn);
+  }
+  matrixClose.append(jumps);
 }
 
 function renderAgentInvestigation(card, report) {
@@ -797,6 +1574,7 @@ function renderAgentInvestigation(card, report) {
     const title = qa.proveedor ? "Investigación Agente QA (MAF)" : "Traza de análisis QA";
     detail.append(createSummary(title));
     const content = element("div", null, "detail-content");
+    content.append(element("p", "Contexto del agente: no decide el dictamen, que lo emite la política determinista REN-001.v2.", "agent-scope-note"));
     if (qa.detalle) content.append(element("p", qa.detalle));
     if (qa.explicacion) content.append(element("p", qa.explicacion));
     if (qa.llamadas && qa.llamadas.length) {
@@ -814,22 +1592,28 @@ function renderAgentInvestigation(card, report) {
   if (secops && secops.estado && secops.estado !== "NO_SOLICITADA") {
     const findings = secops.hallazgos || [];
     const detail = document.createElement("details");
+    const high = highFindings(report);
     const label = findings.length
-      ? `Postura Agente SecOps · ${findings.length} ${findings.length === 1 ? "hallazgo" : "hallazgos"}`
+      ? `Agente SecOps · ${findings.length} ${findings.length === 1 ? "hallazgo" : "hallazgos"}${high ? ` (${high} de severidad alta según el agente)` : ""}`
       : "Postura y telemetría · Agente SecOps";
     detail.append(createSummary(label));
+    detail.classList.add("secops-detail");
 
     const content = element("div", null, "detail-content");
+    content.append(element("p", "Contexto del agente: estos hallazgos no cambian el dictamen REN-001; cada uno indica su alcance.", "agent-scope-note"));
     if (secops.detalle) content.append(element("p", secops.detalle));
     if (secops.resumen) content.append(element("p", secops.resumen));
     for (const h of findings) {
       const box = element("div", null, "finding-item");
       const tags = element("div", null, "scope-tags");
-      tags.append(
-        element("span", `Alcance: ${h.alcance}`, "scope-badge"),
-        element("span", `Severidad: ${h.severidad}`, "scope-badge")
+      const sev = element("span", null, "severity-badge");
+      sev.dataset.level = severityLevel(h.severidad);
+      sev.append(
+        svgIcon({ high: "bang", medium: "warn", low: "dash", info: "info" }[sev.dataset.level], 12),
+        element("span", `Severidad ${String(h.severidad || "sin dato").toLowerCase()}`)
       );
-      box.append(tags, element("strong", h.titulo), element("p", h.evidencia));
+      tags.append(sev, element("span", `Alcance: ${SCOPE_LABELS[h.alcance] || h.alcance}`, "scope-badge"));
+      box.append(tags, termText("strong", h.titulo), termText("p", h.evidencia));
       content.append(box);
     }
     if (secops.llamadas && secops.llamadas.length) {
@@ -846,12 +1630,13 @@ function renderAgentInvestigation(card, report) {
   }
 }
 
+// REN-001 certifies one rule; high-severity SecOps findings are surfaced next to it, never folded away.
 function renderGovernance(card, version, runId, action, focusResult = false) {
   const box = card.querySelector(".governance");
   box.replaceChildren();
 
   if (!action) {
-    box.append(element("p", "Entrega conforme: no requiere acción correctiva en Azure Boards.", "gov-clean-note"));
+    box.append(element("p", "Conforme con REN-001: no requiere acción correctiva en Azure Boards.", "gov-clean-note"));
     return;
   }
 
@@ -860,10 +1645,15 @@ function renderGovernance(card, version, runId, action, focusResult = false) {
 
   const header = element("div", null, "gov-head");
   const heading = element("span", null, "gov-heading");
-  heading.append(svgIcon("info", 14), element("span", "Gobernanza · Azure Boards"));
+  heading.append(svgIcon("doc", 14), element("span", "Gobernanza · Azure Boards"));
   header.append(heading);
   if (action.tag_idempotencia) {
-    header.append(createCopyButton(action.tag_idempotencia, action.tag_idempotencia, `Copiar huella WIQL para ${version}`));
+    const fp = element("span", null, "gov-fingerprint");
+    fp.append(
+      termText("span", "Huella anti-duplicados (WIQL)", "gov-fingerprint-label"),
+      createCopyButton(action.tag_idempotencia, action.tag_idempotencia, `${action.tag_idempotencia}: copiar huella anti-duplicados de ${version}`)
+    );
+    header.append(fp);
   }
   panel.append(header);
   if (action.titulo) panel.append(element("p", action.titulo, "gov-title"));
@@ -902,12 +1692,20 @@ function renderGovernance(card, version, runId, action, focusResult = false) {
   noteInput.id = inputId;
   noteInput.className = "gov-input";
   noteInput.maxLength = 300;
-  noteInput.placeholder = "Ej. Cubrir escenario cancelado antes del cierre de sprint…";
+  noteInput.placeholder = "Ej. Cubrir el caso cancelado este sprint";
   fieldWrap.append(label, noteInput);
 
   const errorBox = element("div", null, "gov-error");
+  errorBox.id = `gov-error-${version}`;
   errorBox.hidden = true;
   errorBox.setAttribute("role", "alert");
+  noteInput.setAttribute("aria-describedby", errorBox.id);
+  noteInput.addEventListener("input", () => {
+    if (noteInput.value.trim() && noteInput.getAttribute("aria-invalid") === "true") {
+      noteInput.removeAttribute("aria-invalid");
+      errorBox.hidden = true;
+    }
+  });
 
   const actionsRow = element("div", null, "gov-buttons");
   const approveBtn = element("button", "Aprobar en Azure Boards", "btn-approve");
@@ -918,6 +1716,14 @@ function renderGovernance(card, version, runId, action, focusResult = false) {
 
   const confirmBox = element("div", null, "gov-confirm-box");
   confirmBox.hidden = true;
+  confirmBox.setAttribute("role", "group");
+  confirmBox.setAttribute("aria-label", "Confirmación de decisión de gobernanza");
+  confirmBox.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    confirmBox.querySelector(".btn-dismiss")?.click();
+  });
 
   let pendingDecision = null;
 
@@ -940,7 +1746,7 @@ function renderGovernance(card, version, runId, action, focusResult = false) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ejecucion: runId, decision, nota: noteInput.value.trim() }),
       });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok) throw new Error(data.error || "No se pudo actualizar la decisión en el punto de control.");
 
       const currentReport = reportsByVersion.get(version);
@@ -949,10 +1755,8 @@ function renderGovernance(card, version, runId, action, focusResult = false) {
         if (data.etapas_devsecops?.length) currentReport.etapas_devsecops = data.etapas_devsecops;
       }
       renderGovernance(card, version, runId, data.accion_propuesta, true);
-      if (data.etapas_devsecops?.length) {
-        renderStages(card.querySelector(".stages"), data.etapas_devsecops, version);
-        updateTransitCorridor();
-      }
+      refreshStageViews();
+      updateTransitCorridor();
       setStatus(
         decision === "aprobar"
           ? `Tarea sincronizada en Azure Boards (${data.accion_propuesta?.boards_resultado?.referencia || "OK"})`
@@ -964,14 +1768,46 @@ function renderGovernance(card, version, runId, action, focusResult = false) {
       dismissBtn.disabled = false;
       noteInput.disabled = false;
       actionsRow.hidden = false;
-      errorBox.replaceChildren(element("span", err.message));
+      const message = describeFetchError(err, "No se pudo registrar la decisión en el punto de control; tu nota se conservó.");
+      errorBox.replaceChildren(element("span", message));
       const retry = element("button", "Reintentar", "btn-inline-action");
       retry.type = "button";
       retry.addEventListener("click", () => submitDecision(decision));
       errorBox.append(retry);
       errorBox.hidden = false;
-      setStatus(err.message, "error");
+      setStatus(message, "error");
     }
+  };
+
+  const startGrace = (decision) => {
+    let left = 5;
+    confirmBox.replaceChildren();
+    const msg = element("p", null, "gov-grace-text");
+    const undoBtn = element("button", "Deshacer", "btn-dismiss");
+    undoBtn.type = "button";
+    const say = () => {
+      msg.textContent = decision === "aprobar"
+        ? `Se enviará a Azure Boards en ${left} s.`
+        : `El descarte se registrará en ${left} s.`;
+    };
+    say();
+    const timer = setInterval(() => {
+      left -= 1;
+      if (left > 0) return say();
+      clearInterval(timer);
+      submitDecision(decision);
+    }, 1000);
+    undoBtn.addEventListener("click", () => {
+      clearInterval(timer);
+      confirmBox.hidden = true;
+      actionsRow.hidden = false;
+      (decision === "aprobar" ? approveBtn : dismissBtn).focus();
+      pendingDecision = null;
+      announce("Decisión deshecha: no se envió nada a Azure Boards.");
+    });
+    confirmBox.append(msg, undoBtn);
+    undoBtn.focus();
+    announce(`${msg.textContent} Pulsa Deshacer para cancelar.`);
   };
 
   const askConfirmation = (decision) => {
@@ -979,14 +1815,16 @@ function renderGovernance(card, version, runId, action, focusResult = false) {
     if (decision === "descartar" && !noteInput.value.trim()) {
       errorBox.replaceChildren(element("span", "Escribe un motivo en el campo de nota antes de descartar permanentemente esta brecha."));
       errorBox.hidden = false;
+      noteInput.setAttribute("aria-invalid", "true");
       noteInput.focus();
       return;
     }
+    noteInput.removeAttribute("aria-invalid");
     pendingDecision = decision;
     actionsRow.hidden = true;
     confirmBox.replaceChildren();
     const promptText = decision === "aprobar"
-      ? `¿Confirmas sincronizar en Azure Boards (historia padre AB#${action.historia_padre || 1}) usando la huella ${action.tag_idempotencia || "idempotente"}?`
+      ? `¿Confirmas sincronizar en Azure Boards bajo la historia AB#${action.historia_padre || 1}? Si ya existe una tarea con la huella ${action.tag_idempotencia || "idempotente"}, se actualiza; si no, se crea una nueva.`
       : "¿Confirmas descartar esta acción? Esta resolución bloquea permanentemente el punto de control de esta corrida.";
     const bar = element("div", null, "gov-confirm-bar");
     const confirmBtn = element(
@@ -995,7 +1833,7 @@ function renderGovernance(card, version, runId, action, focusResult = false) {
       decision === "aprobar" ? "btn-approve" : "btn-danger"
     );
     confirmBtn.type = "button";
-    confirmBtn.addEventListener("click", () => submitDecision(pendingDecision));
+    confirmBtn.addEventListener("click", () => startGrace(pendingDecision));
 
     const cancelConfirmBtn = element("button", "Cancelar", "btn-dismiss");
     cancelConfirmBtn.type = "button";
@@ -1007,9 +1845,14 @@ function renderGovernance(card, version, runId, action, focusResult = false) {
     });
 
     bar.append(confirmBtn, cancelConfirmBtn);
-    confirmBox.append(element("p", promptText), bar);
+    const prompt = element("p", promptText);
+    prompt.id = `gov-confirm-${version}`;
+    confirmBtn.setAttribute("aria-describedby", prompt.id);
+    cancelConfirmBtn.setAttribute("aria-describedby", prompt.id);
+    confirmBox.append(prompt, bar);
     confirmBox.hidden = false;
-    confirmBtn.focus();
+    // Safe default: a stray Enter cancels instead of writing to Boards.
+    cancelConfirmBtn.focus();
   };
 
   approveBtn.addEventListener("click", () => askConfirmation("aprobar"));
@@ -1026,25 +1869,27 @@ function renderDownloads(card, report) {
   if (!runId) return;
 
   const files = [
-    ["informe.md", "Informe MD"],
-    ["informe.json", "Evidencia JSON"],
+    ["informe.md", "Informe", "Informe en Markdown"],
+    ["informe.json", "JSON", "Evidencia completa en JSON"],
   ];
-  if (report.ejecucion?.trx) files.push(["resultados.trx", "TRX XML"]);
-  if (report.ejecucion?.log) files.push(["dotnet-test.log", "Registro .log"]);
-  if (report.accion_propuesta) files.push(["checkpoint_aprobacion.json", "Punto de control"]);
+  if (report.ejecucion?.trx) files.push(["resultados.trx", "TRX", "Resultados de pruebas en TRX"]);
+  if (report.ejecucion?.log) files.push(["dotnet-test.log", "Registro", "Registro de ejecución de dotnet test"]);
+  if (report.accion_propuesta) files.push(["checkpoint_aprobacion.json", "Punto de control", "Punto de control de la decisión humana en JSON"]);
 
-  for (const [file, label] of files) {
+  downloads.append(element("span", "Artefactos", "artifact-label"));
+  const list = element("ul", null, "artifact-list");
+  for (const [file, label, full] of files) {
+    const li = document.createElement("li");
     const link = element("a", null, "artifact-link");
     link.href = `/informes/${runId}/${file}`;
     link.target = "_blank";
     link.rel = "noopener";
-    link.append(
-      svgIcon("doc", 13),
-      element("span", label),
-      element("span", " (se abre en una nueva pestaña)", "sr-only")
-    );
-    downloads.append(link);
+    link.title = full;
+    link.append(element("span", label), element("span", `: ${full} (se abre en una nueva pestaña)`, "sr-only"));
+    li.append(link);
+    list.append(li);
   }
+  downloads.append(list);
 }
 
 function showReport(card, version, report, options = {}) {
@@ -1060,21 +1905,22 @@ function showReport(card, version, report, options = {}) {
   const verdictInfo = VERDICT_META[report.veredicto] || { state: "unknown", label: report.veredicto };
   resetCardBands(card, verdictInfo.state, verdictInfo.label, report.justificacion, provenanceLabel, isLive);
 
+  const nextStep = card.querySelector(".next-step");
   if (report.siguiente_paso) {
-    const nextStep = card.querySelector(".next-step");
     nextStep.textContent = `Siguiente paso recomendado: ${report.siguiente_paso}`;
     nextStep.hidden = false;
   }
 
   renderDeterministicProof(card, report);
-  renderStages(card.querySelector(".stages"), report.etapas_devsecops, version);
+  refreshStageViews();
   renderAgentInvestigation(card, report);
   renderGovernance(card, version, report.ejecucion?.id, report.accion_propuesta, false);
   renderDownloads(card, report);
   updateTransitCorridor();
+  if (options.stamp) replayClass(card, "is-stamped", 820);
 
   if (!stageInspector.hidden && inspectedStage) {
-    openStageInspector(inspectedStage, inspectedVersion);
+    openStageInspector(inspectedStage, inspectedVersion, null, { refresh: true });
   }
 
   const qaState = report.investigacion?.estado;
@@ -1088,24 +1934,40 @@ function syncVisibleCardGrid() {
 }
 
 form.elements.modo.addEventListener("change", () => {
+  disarm(runBtn);
+  for (const btn of document.querySelectorAll(".card-eval-btn")) {
+    disarm(btn);
+    btn.textContent = evalLabel(btn.dataset.eval);
+  }
   document.querySelector("#mode-help").textContent = form.elements.modo.value === "agente"
     ? "Ejecuta en paralelo los agentes de QA y Seguridad/Operación sobre Azure AI Foundry; el dictamen lo decide siempre la política determinista."
     : "Evalúa la evidencia local y cloud aplicando únicamente la política determinista sin consumir tokens de IA.";
 });
 
 filterDiffBtn.addEventListener("click", () => {
+  // Remember where focus was so the re-render does not drop it to <body>.
+  const active = document.activeElement;
+  const scope = active?.closest?.(".card, #shared-stages");
+  const focusedStage = scope ? active.dataset.stage : null;
+
   filterDiffOnly = !filterDiffOnly;
   filterDiffBtn.setAttribute("aria-pressed", String(filterDiffOnly));
-  for (const [ver, rep] of reportsByVersion.entries()) {
-    const card = cards.get(ver);
-    if (card) renderStages(card.querySelector(".stages"), rep.etapas_devsecops, ver);
+  corridorFilterNote.hidden = !filterDiffOnly;
+  refreshStageViews();
+  syncHash();
+  // List re-entry: short sibling stagger, capped so the whole list lands within ~0.4 s.
+  for (const container of [...cards.values(), sharedStagesBand]) {
+    container.querySelectorAll(".stage-list > li, .shared-stage-list > li, .stage-pass-strip, .stage-filter-empty").forEach((node, i) => {
+      animateIn(node, { dy: 6, delay: Math.min(i * 40, 200), duration: 220 });
+    });
   }
-  setStatus(
-    filterDiffOnly
-      ? "Filtro activo: mostrando únicamente etapas con fallos o atención requerida."
-      : "Mostrando las 8 etapas completas del ciclo DevSecOps.",
-    "info"
-  );
+  if (focusedStage) {
+    const again = scope.querySelector(`[data-stage="${focusedStage}"]`);
+    (again || filterDiffBtn).focus();
+  }
+  announce(filterDiffOnly
+    ? "Filtro activo: solo etapas incumplidas, sin confirmar, con atención requerida o con una señal por revisar."
+    : "Vista completa: brechas e informativas como filas, verificadas agrupadas al pie de cada entrega.");
 });
 
 cancelBtn.addEventListener("click", () => {
@@ -1121,7 +1983,9 @@ async function executeAssessment(selectedVersions, mode, options = {}) {
   formControls.forEach((el) => { el.disabled = true; });
   cancelBtn.hidden = false;
   cancelBtn.disabled = false;
+  loadLatestBtn.hidden = true;
   results.setAttribute("aria-busy", "true");
+  setRunning(true);
 
   for (const [version, card] of cards) {
     if (!preserveVisible) {
@@ -1130,20 +1994,17 @@ async function executeAssessment(selectedVersions, mode, options = {}) {
       card.hidden = false;
     }
     if (selectedVersions.includes(version)) {
-      resetCardBands(
-        card,
-        "idle",
-        "En cola",
-        "Preparando entorno aislado de compilación y recolección de artefactos…",
-        "Ejecución en preparación…",
-        false
-      );
+      const queuedReason = "Preparando entorno aislado de compilación y recolección de artefactos…";
+      if (reportsByVersion.has(version)) holdCard(card, "idle", "En cola", queuedReason, "Ejecución en preparación…");
+      else resetCardBands(card, "idle", "En cola", queuedReason, "Ejecución en preparación…", false);
     }
   }
   syncVisibleCardGrid();
+  refreshStageViews();
 
   let issues = 0;
   let aborted = false;
+  let reachedIndex = -1;
 
   try {
     for (const [index, version] of selectedVersions.entries()) {
@@ -1151,12 +2012,16 @@ async function executeAssessment(selectedVersions, mode, options = {}) {
         aborted = true;
         break;
       }
+      reachedIndex = index;
       const card = cards.get(version);
+      markRunningVersion(version, index, selectedVersions.length);
       setStatus(`Evaluando ${version} (${index + 1} de ${selectedVersions.length}) · ${mode === "agente" ? "Agentes MAF" : "Solo evidencia"}…`, "busy");
       const runningReason = mode === "agente"
         ? "Ejecutando pruebas xUnit y consultando en paralelo a los agentes de QA y SecOps…"
         : "Ejecutando pruebas xUnit y verificando integridad de fuentes con SHA-256…";
-      resetCardBands(card, "busy", "Evaluando", runningReason, "Ejecutando ahora…", true);
+      if (card.dataset.stale === "true") holdCard(card, "busy", "Evaluando", runningReason, "Ejecutando ahora…");
+      else resetCardBands(card, "busy", "Evaluando", runningReason, "Ejecutando ahora…", false);
+      refreshStageViews();
 
       try {
         const response = await fetch("/api/evaluar", {
@@ -1165,11 +2030,10 @@ async function executeAssessment(selectedVersions, mode, options = {}) {
           body: JSON.stringify({ version, modo: mode }),
           signal: activeController.signal,
         });
-        const data = await response.json();
+        const data = await readJson(response);
         if (!response.ok) throw new Error(data.error || `La evaluación de ${version} no pudo completarse.`);
         cachedLatest[version] = { ...data, registrado_ms: Date.now() };
-        loadLatestBtn.hidden = false;
-        if (showReport(card, version, data, { isLive: true, timestampMs: Date.now() })) issues++;
+        if (showReport(card, version, data, { isLive: true, timestampMs: Date.now(), stamp: true })) issues++;
       } catch (error) {
         if (error.name === "AbortError") {
           aborted = true;
@@ -1181,21 +2045,53 @@ async function executeAssessment(selectedVersions, mode, options = {}) {
           break;
         }
         issues++;
-        resetCardBands(card, "error", "Error de ejecución", error.message, "Fallo de ejecución", false);
+        const message = describeFetchError(error, `La evaluación de ${version} no pudo completarse.`);
+        // A failed re-run must not cost the evidence that was on screen: fall back to the last good run.
+        if (cachedLatest[version]) showReport(card, version, cachedLatest[version], { isLive: false });
+        else resetCardBands(card, "error", "Error de ejecución", message, "Fallo de ejecución", false);
         const alertEl = card.querySelector(".card-alert");
-        const retryBtn = element("button", `Reintentar ${version}`, "btn-inline-action");
+        const offline = error instanceof TypeError;
+        const viaAgents = mode === "agente" && !offline;
+        const kept = cachedLatest[version] ? " Debajo sigue la última corrida guardada." : "";
+        const cause = offline
+          ? `El servidor de la consola no respondió durante la evaluación de ${version}.${kept} Comprueba que siga en marcha y reintenta.`
+          : viaAgents
+            ? `Falló la corrida de ${version} con agentes (${message.replace(/\.$/, "")}).${kept} Puedes repetirla con la evidencia determinista, que no consume tokens.`
+            : `La corrida de ${version} no terminó (${message.replace(/\.$/, "")}).${kept} Revisa el registro de la consola y reintenta.`;
+        alertEl.replaceChildren(element("span", cause));
+        const retryMode = viaAgents ? "solo-evidencia" : mode;
+        const retryBtn = element("button", viaAgents ? `Reintentar ${version} con Solo evidencia · 0 tokens` : `Reintentar ${version}`, "btn-inline-action");
         retryBtn.type = "button";
-        retryBtn.addEventListener("click", () => executeAssessment([version], mode, { preserveVisible: true }));
-        alertEl.append(
-          element("span", `${error.message} Si falló el proveedor IA, prueba con «Solo evidencia determinista».`),
-          retryBtn
-        );
+        retryBtn.dataset.eval = version;
+        retryBtn.addEventListener("click", () => {
+          if (activeController || !confirmPaidRun(retryBtn, 1, retryMode)) return;
+          executeAssessment([version], retryMode, { preserveVisible: true });
+        });
+        alertEl.append(retryBtn);
         alertEl.hidden = false;
       }
     }
 
     if (aborted) {
-      setStatus("Evaluación detenida por el usuario. Las entregas previas se conservaron.", "warn");
+      // Deliveries still queued when the run stopped go back to their last cached run, or say plainly they were not evaluated.
+      const fromCache = [];
+      const notRun = [];
+      // The in-flight delivery is settled by its own catch; only the ones never reached are handled here.
+      for (const v of selectedVersions.slice(reachedIndex + 1)) {
+        const queuedCard = cards.get(v);
+        if (cachedLatest[v]) {
+          showReport(queuedCard, v, cachedLatest[v], { isLive: false });
+          fromCache.push(v);
+        } else {
+          resetCardBands(queuedCard, "idle", "No evaluada", "La evaluación se detuvo antes de llegar a esta entrega.", "Sin corrida", false);
+          notRun.push(v);
+        }
+      }
+      refreshStageViews();
+      const parts = ["Evaluación detenida por el usuario."];
+      if (fromCache.length) parts.push(`${fromCache.join(" y ")} ${fromCache.length === 1 ? "muestra su" : "muestran su"} última corrida en caché.`);
+      if (notRun.length) parts.push(`${notRun.join(" y ")} ${notRun.length === 1 ? "quedó" : "quedaron"} sin evaluar.`);
+      setStatus(parts.join(" "), "warn");
     } else if (issues) {
       setStatus(`Evaluación completada con ${issues} ${issues === 1 ? "diagnóstico operativo" : "diagnósticos operativos"}.`, "warn");
     } else {
@@ -1210,6 +2106,9 @@ async function executeAssessment(selectedVersions, mode, options = {}) {
     cancelBtn.hidden = true;
     results.setAttribute("aria-busy", "false");
     formControls.forEach((el) => { el.disabled = false; });
+    setRunning(false);
+    refreshStageViews();
+    loadLatestBtn.hidden = Object.keys(cachedLatest).length === 0;
   }
 }
 
@@ -1217,79 +2116,114 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const mode = form.elements.modo.value;
   const chosen = form.elements.version.value === "todas" ? versions : [form.elements.version.value];
+  if (!confirmPaidRun(runBtn, chosen.length)) return;
   await executeAssessment(chosen, mode, { preserveVisible: false });
 });
 
-function restoreCachedRuns() {
+function restoreCachedRuns({ stamp = false } = {}) {
   let count = 0;
   for (const ver of versions) {
     const card = cards.get(ver);
     card.hidden = false;
     if (cachedLatest[ver]) {
-      showReport(card, ver, cachedLatest[ver], { isLive: false, timestampMs: cachedLatest[ver].registrado_ms });
+      showReport(card, ver, cachedLatest[ver], { isLive: false, timestampMs: cachedLatest[ver].registrado_ms, stamp });
       count++;
     }
   }
   syncVisibleCardGrid();
+  loadLatestBtn.hidden = true;
   if (count) {
-    setStatus(`Mostrando ${count} corridas previas en caché (0 tokens). Pulsa «Ejecutar evaluación» para auditar en vivo.`, "info");
+    setStatus("Mostrando la última corrida guardada de cada entrega. Pulsa «Ejecutar evaluación» para auditar en vivo.", "info");
   } else {
-    setStatus("No hay corridas previas almacenadas.", "idle");
+    setStatus("No hay corridas previas almacenadas. Pulsa «Ejecutar evaluación» para auditar las entregas.", "idle");
   }
 }
 
-loadLatestBtn.addEventListener("click", restoreCachedRuns);
+loadLatestBtn.addEventListener("click", () => restoreCachedRuns({ stamp: true }));
 
 // Global Keyboard Accelerators
+// Esc peels the topmost layer first; stopping a paid run needs a second Esc within 3 s.
+function handleEscape(event) {
+  if (!stageInspector.hidden) {
+    event.preventDefault();
+    closeStageInspector();
+    return;
+  }
+  if (!helpDrawer.hidden) {
+    event.preventDefault();
+    setHelpOpen(false, { restore: true });
+    return;
+  }
+  if (!activeController) return;
+  event.preventDefault();
+  if (Date.now() < escArmedUntil) {
+    escArmedUntil = 0;
+    activeController.abort();
+    return;
+  }
+  escArmedUntil = Date.now() + 3000;
+  const previous = [status.textContent, statusBanner.dataset.tone];
+  const armMessage = "Pulsa Esc otra vez para detener la evaluación en curso.";
+  setStatus(armMessage, "warn");
+  setTimeout(() => {
+    if (status.textContent === armMessage) setStatus(...previous);
+  }, 3000);
+}
+
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
-    if (activeController) {
-      event.preventDefault();
-      activeController.abort();
-      return;
-    }
-    if (!stageInspector.hidden) {
-      event.preventDefault();
-      closeStageInspector();
-      return;
-    }
-    if (!helpDrawer.hidden) {
-      event.preventDefault();
-      setHelpOpen(false);
-      helpToggleBtn.focus({ preventScroll: true });
-      return;
-    }
+    handleEscape(event);
+    return;
   }
 
   const tag = document.activeElement?.tagName;
-  if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || event.metaKey || event.ctrlKey || event.altKey) {
+  if (!shortcutsEnabled || tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || event.metaKey || event.ctrlKey || event.altKey) {
     return;
   }
 
   if (event.key === "?") {
     event.preventDefault();
-    setHelpOpen(helpDrawer.hidden);
-  } else if ((event.key === "r" || event.key === "R") && !activeController) {
+    setHelpOpen(helpDrawer.hidden, { restore: true });
+  } else if (event.key === "r" || event.key === "R") {
+    // R only moves focus to the run button; starting a token-spending run always takes an explicit Enter or click.
     event.preventDefault();
-    runBtn.click();
+    runBtn.scrollIntoView({ behavior: reducedMotion.matches ? "auto" : "smooth", block: "nearest" });
+    runBtn.focus({ preventScroll: true });
   } else if (event.key === "d" || event.key === "D") {
     event.preventDefault();
     filterDiffBtn.click();
   } else if (event.key >= "1" && event.key <= "8") {
     event.preventDefault();
     openStageInspector(Number(event.key), inspectedVersion);
+  } else if ((event.key === "v" || event.key === "V") && !stageInspector.hidden) {
+    event.preventDefault();
+    const next = versions[(versions.indexOf(inspectedVersion) + 1) % versions.length];
+    openStageInspector(inspectedStage, next);
+  } else if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && !stageInspector.hidden) {
+    event.preventDefault();
+    stepInspector(event.key === "ArrowLeft" ? -1 : 1);
   }
 });
 
+function reportEcosystemFailure(message) {
+  sandboxPill.dataset.active = "false";
+  sandboxText.textContent = "Estado de :5080 desconocido";
+  sandboxOpenLink.hidden = true;
+  stopSandboxBtn.hidden = true;
+  setStatus(message, "warn");
+  showSandboxError(`${message} Pulsa «Reintentar» para volver a leerlo.`, initEcosystem);
+}
+
 async function initEcosystem() {
   initTransitCorridor();
+  sandboxAlertWrap.hidden = true;
   try {
     const res = await fetch("/api/ecosistema");
     if (!res.ok) {
-      updateSandboxBanner(null);
+      reportEcosystemFailure("No se pudo leer el estado del ecosistema; puedes ejecutar una evaluación igualmente.");
       return;
     }
-    const data = await res.json();
+    const data = await readJson(res);
     const eco = data.ecosistema || {};
     cachedLatest = data.ultimos || {};
 
@@ -1309,20 +2243,30 @@ async function initEcosystem() {
 
     updateSandboxBanner(eco.sandbox);
 
-    if (Object.keys(cachedLatest).length > 0) {
-      loadLatestBtn.hidden = false;
-    }
-
     const params = new URLSearchParams(window.location.search);
     const autoVer = params.get("autoevaluar");
+    if (Object.keys(cachedLatest).length > 0) {
+      loadLatestBtn.hidden = false;
+      if (!versions.includes(autoVer)) {
+        form.elements.modo.value = "solo-evidencia";
+        form.elements.modo.dispatchEvent(new Event("change"));
+        document.querySelector("#mode-help").textContent = "Elegido porque ya hay corridas guardadas: revisarlas no consume tokens. Cambia a «Agentes MAF» para auditar con IA.";
+      }
+    }
+
     if (versions.includes(autoVer)) {
       form.elements.version.value = autoVer;
+      corridorPrimed = true;
       await executeAssessment([autoVer], form.elements.modo.value, { preserveVisible: false });
     } else if (Object.keys(cachedLatest).length > 0) {
       restoreCachedRuns();
     }
-  } catch {
-    updateSandboxBanner(null);
+    applyHash();
+  } catch (err) {
+    reportEcosystemFailure(describeFetchError(err, "No se pudo cargar el estado inicial."));
+  } finally {
+    // Stations only animate state changes after the first paint, never as page-load choreography.
+    corridorPrimed = true;
   }
 }
 

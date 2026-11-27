@@ -9,7 +9,7 @@
   <script src="/app.js" defer></script>
 </head>
 <body>
-  <a class="skip-link" href="#controls">Saltar a los controles de evaluación</a>
+  <a class="skip-link" href="#contenido">Saltar al dictamen y los controles</a>
 
   <header class="masthead">
     <div class="frame topbar">
@@ -76,13 +76,14 @@
             </svg>
             <span class="sr-only"> (se abre en una nueva pestaña)</span>
           </a>
+          <button type="button" class="sandbox-btn sandbox-toggle" id="sandbox-toggle" aria-expanded="false" aria-controls="sandbox-actions">Gestionar :5080</button>
         </div>
 
-        <div class="sandbox-actions" role="group" aria-label="Puente interoperable con sujeto de prueba en puerto 5080">
-          <span class="sandbox-label">Probar sujeto en vivo (:5080):</span>
-          <button type="button" class="sandbox-btn" data-launch="v1">Iniciar v1</button>
-          <button type="button" class="sandbox-btn" data-launch="v2">Iniciar v2</button>
-          <button type="button" class="sandbox-btn" data-launch="v3">Iniciar v3</button>
+        <div class="sandbox-actions" id="sandbox-actions" role="group" aria-label="Puente interoperable con sujeto de prueba en puerto 5080">
+          <span class="sandbox-label">Sujeto en vivo:</span>
+          <button type="button" class="sandbox-btn" data-launch="v1">Iniciar v1 en :5080</button>
+          <button type="button" class="sandbox-btn" data-launch="v2">Iniciar v2 en :5080</button>
+          <button type="button" class="sandbox-btn" data-launch="v3">Iniciar v3 en :5080</button>
           <button type="button" class="sandbox-btn sandbox-stop" id="stop-sandbox" hidden>Detener :5080</button>
         </div>
       </div>
@@ -95,7 +96,7 @@
     </div>
   </header>
 
-  <main class="frame workspace">
+  <main class="frame workspace" id="contenido" tabindex="-1">
     <section class="command-deck" aria-labelledby="title">
       <div class="deck-header">
         <div class="deck-heading-block">
@@ -118,12 +119,32 @@
       <section id="help-drawer" class="help-drawer" hidden aria-labelledby="help-drawer-title" tabindex="-1">
         <div class="help-drawer-head">
           <h2 id="help-drawer-title">Referencia operativa de política, alcances y teclado</h2>
-          <button type="button" class="btn-ghost" id="help-close-btn">Cerrar guía (Esc)</button>
+          <button type="button" class="btn-ghost" id="help-close-btn">Cerrar guía<span class="kbd-hint"> (Esc)</span></button>
         </div>
         <div class="help-grid">
           <div class="help-col">
+            <h3>Cómo leer los dictámenes</h3>
+            <p><strong>Verificado:</strong> existe una prueba vinculada a REN-001 y aprobó. <strong>Incumplido:</strong> la prueba vinculada falla; hay regresión. <strong>Evidencia insuficiente:</strong> la suite pasa, pero ninguna prueba cubre contratos cancelados.</p>
+          </div>
+          <div class="help-col">
+            <h3>Escenario de la demostración</h3>
+            <p>Las carpetas <code>v1/</code>, <code>v2/</code> y <code>v3/</code> están preparadas para mostrar los tres dictámenes: <code>v1</code> excluye los cancelados y tiene la prueba REN-001; <code>v2</code> introduce una regresión que esa prueba detecta; <code>v3</code> excluye los cancelados pero no tiene prueba vinculada, una brecha silenciosa. La consola no da por hecho ninguno de los tres: los decide cada corrida.</p>
+          </div>
+          <div class="help-col">
+            <h3>Estados de cada etapa</h3>
+            <ul class="help-states" id="help-states">
+              <li><span class="ver-pip" data-state="verificado" aria-hidden="true"></span><span><strong>Verificado:</strong> la evidencia cumple la regla.</span></li>
+              <li><span class="ver-pip" data-state="incumplido" aria-hidden="true"></span><span><strong>Incumplido:</strong> la evidencia contradice la regla.</span></li>
+              <li><span class="ver-pip" data-state="pendiente" aria-hidden="true"></span><span><strong>Sin confirmar:</strong> falta un dato para decidir esta etapa. Es un estado de etapa: el dictamen «Evidencia insuficiente» solo se aplica a la entrega completa.</span></li>
+              <li><span class="ver-pip" data-state="atencion" aria-hidden="true"></span><span><strong>Atención requerida:</strong> hay hallazgos o una acción espera revisión humana.</span></li>
+              <li><span class="ver-pip" data-state="informativo" aria-hidden="true"></span><span><strong>Informativo:</strong> métrica recolectada sin regla que la apruebe o la rechace. Si lleva «· por revisar» o «· sin línea base», trae una señal que alguien debe mirar, y «Solo brechas» la mantiene visible.</span></li>
+              <li><span class="ver-pip" aria-hidden="true"></span><span><strong>Sin datos:</strong> la entrega aún no se ha evaluado en esta sesión.</span></li>
+            </ul>
+          </div>
+          <div class="help-col">
             <h3>Certificación REN-001.v2</h3>
             <p>Exige una prueba C# marcada con <code>[Trait("Criterio", "REN-001")]</code> que prepare un contrato cancelado, invoque la evaluación, verifique <code>Assert.Empty</code> y registre <code>Passed</code> en el XML del TRX firmado con SHA-256.</p>
+            <p class="help-glossary"><abbr title="Microsoft Agent Framework">MAF</abbr>: agentes de QA y SecOps · <abbr title="Human in the loop">HITL</abbr>: una persona aprueba o descarta cada acción · <abbr title="Visual Studio Test Results">TRX</abbr>: resultados XML de <code>dotnet test</code>. Los hallazgos SecOps de severidad alta se muestran aparte: REN-001 certifica una sola regla.</p>
           </div>
           <div class="help-col">
             <h3>Alcances de hallazgos SecOps</h3>
@@ -131,13 +152,28 @@
           </div>
           <div class="help-col">
             <h3>Gobernanza WIQL idempotente</h3>
-            <p>Las entregas en <code>Incumplido</code> o <code>Evidencia insuficiente</code> generan un punto de control con huella <code>devsecops-fp-…</code>. Al aprobar, WIQL actualiza la tarea abierta en <code>AB#1</code> sin crear duplicados.</p>
+            <p>Las entregas en <code>Incumplido</code> o <code>Evidencia insuficiente</code> generan un punto de control con huella <code>devsecops-fp-…</code>. Al aprobar, WIQL actualiza la tarea abierta en <code>AB#1</code> sin crear duplicados. Sin conexión cloud, elige el motor <strong>Solo evidencia · 0 tokens</strong>.</p>
           </div>
           <div class="help-col">
-            <h3>Atajos rápidos y contingencia</h3>
-            <p><kbd>R</kbd> ejecuta la evaluación · <kbd>D</kbd> filtra solo brechas · <kbd>1</kbd>–<kbd>8</kbd> inspecciona cada etapa · <kbd>?</kbd> abre esta guía · <kbd>Esc</kbd> cancela o cierra. Sin conexión cloud, elige <strong>Solo evidencia determinista</strong> (0 tokens).</p>
+            <h3>Atajos de teclado</h3>
+            <dl class="shortcut-list">
+              <div><dt><kbd>R</kbd></dt><dd>Lleva el foco a «Ejecutar evaluación» (Enter la inicia)</dd></div>
+              <div><dt><kbd>D</kbd></dt><dd>Solo brechas</dd></div>
+              <div><dt><kbd>1</kbd>–<kbd>8</kbd></dt><dd>Abre la estación</dd></div>
+              <div><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Estación anterior o siguiente</dd></div>
+              <div><dt><kbd>V</kbd></dt><dd>Cambia de versión en el inspector</dd></div>
+              <div><dt><kbd>?</kbd></dt><dd>Abre o cierra esta guía</dd></div>
+              <div><dt><kbd>Esc</kbd></dt><dd>Cierra el panel superior; dos veces detiene una evaluación</dd></div>
+            </dl>
+            <label class="shortcut-toggle"><input type="checkbox" id="shortcuts-toggle" checked> Atajos de una tecla activos</label>
           </div>
         </div>
+      </section>
+
+      <section class="verdict-strip" id="verdict-strip" aria-labelledby="verdict-strip-title" hidden>
+        <h2 id="verdict-strip-title" class="sr-only">Dictamen por entrega</h2>
+        <p class="verdict-headline"></p>
+        <ol class="verdict-list"></ol>
       </section>
 
       <form class="controls" id="controls">
@@ -146,17 +182,17 @@
             <label for="scope-select">Alcance de entregas</label>
             <select id="scope-select" name="version">
               <option value="todas">Comparar las tres entregas (v1 · v2 · v3)</option>
-              <option value="v1">Solo Versión 1 · Cumple código y prueba REN-001</option>
-              <option value="v2">Solo Versión 2 · Regresión funcional en cancelados</option>
-              <option value="v3">Solo Versión 3 · Suite en verde sin evidencia REN-001</option>
+              <option value="v1">Solo v1 · escenario: cumple código y prueba REN-001</option>
+              <option value="v2">Solo v2 · escenario: regresión en cancelados</option>
+              <option value="v3">Solo v3 · escenario: suite en verde sin prueba REN-001</option>
             </select>
           </div>
 
           <div class="field-group">
             <label for="mode-select">Motor de análisis</label>
             <select id="mode-select" name="modo" aria-describedby="mode-help">
-              <option value="agente">Con agentes MAF en paralelo (QA + SecOps)</option>
-              <option value="solo-evidencia">Solo evidencia determinista (0 tokens)</option>
+              <option value="agente">Agentes MAF · QA y SecOps</option>
+              <option value="solo-evidencia">Solo evidencia · 0 tokens</option>
             </select>
           </div>
 
@@ -167,50 +203,57 @@
               </svg>
               <span>Ejecutar evaluación</span>
             </button>
-            <button type="button" class="btn-danger" id="cancel-btn" hidden>Detener evaluación</button>
-            <button type="button" class="btn-secondary" id="filter-diff-btn" aria-pressed="false" title="Mostrar únicamente etapas con fallos o atención (Atajo: D)">
-              Solo brechas
-            </button>
-            <button type="button" class="btn-secondary" id="load-latest" hidden>Restaurar caché</button>
+            <button type="button" class="btn-danger" id="cancel-btn" hidden>Detener evaluación<span class="kbd-hint"> (Esc ×2)</span></button>
+            <button type="button" class="btn-secondary" id="load-latest" hidden title="Vuelve a mostrar las últimas corridas guardadas sin consumir tokens">Restaurar caché</button>
           </div>
         </div>
         <p id="mode-help" class="mode-caption">Ejecuta en paralelo los agentes de QA y Seguridad/Operación sobre Azure AI Foundry; el dictamen lo decide siempre la política determinista.</p>
       </form>
+
+      <div class="results-toolbar">
+        <div class="status-banner" id="status-banner" data-tone="idle">
+          <span class="status-dot" aria-hidden="true"></span>
+          <p id="status" role="status" aria-live="polite">Listo para ejecutar evaluación</p>
+        </div>
+        <p id="announcer" class="sr-only" aria-live="polite"></p>
+        <button type="button" class="btn-secondary" id="filter-diff-btn" aria-pressed="false" title="Mostrar únicamente etapas con fallos o atención (Atajo: D)">
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.5 3.5h11L9.2 8.6v4l-2.4 1V8.6z"></path></svg>
+          <span>Solo brechas</span>
+        </button>
+      </div>
     </section>
 
     <section class="transit-corridor" aria-labelledby="cycle-heading">
       <div class="corridor-header">
         <div>
           <h2 id="cycle-heading">Corredor de trazabilidad de las 8 etapas DevSecOps</h2>
-          <p class="section-sub">Selecciona cualquier estación (o pulsa <kbd>1</kbd>–<kbd>8</kbd>) para inspeccionar la pregunta de gobierno, las métricas recolectadas y la comparación entre <code>v1</code>, <code>v2</code> y <code>v3</code>.</p>
+          <p class="section-sub">Selecciona cualquier etapa<span class="kbd-hint"> (o pulsa <kbd>1</kbd>–<kbd>8</kbd>)</span> para inspeccionar la pregunta de gobierno, las métricas recolectadas y la comparación entre <code>v1</code>, <code>v2</code> y <code>v3</code>.</p>
         </div>
-        <div class="corridor-legend" aria-label="Leyenda de estados de estación">
-          <span class="legend-item"><span class="legend-dot" data-state="verificado" aria-hidden="true"></span>Verificado</span>
-          <span class="legend-item"><span class="legend-dot" data-state="atencion" aria-hidden="true"></span>Atención</span>
-          <span class="legend-item"><span class="legend-dot" data-state="incumplido" aria-hidden="true"></span>Incumplido</span>
-        </div>
+        <ul class="corridor-legend" id="corridor-legend" aria-label="Leyenda de estados de estación"></ul>
+        <p class="filter-note" id="corridor-filter-note" hidden>Filtro «Solo brechas» activo: el corredor muestra las 8 etapas; la matriz oculta las que no tienen brecha.</p>
       </div>
 
-      <div class="corridor-map">
+      <div class="corridor-map" id="corridor-map" data-running="false">
         <div class="corridor-wing">
-          <h3 class="wing-heading">Línea DevSec · Código y evidencia</h3>
-          <ol class="station-list" id="loop-devsec"></ol>
+          <h3 class="wing-heading" data-line="devsec"><span class="line-bullet" aria-hidden="true">DS</span>Línea DevSec · Código y evidencia</h3>
+          <ol class="station-list" id="loop-devsec" data-line="devsec"></ol>
         </div>
 
         <div class="corridor-hub">
           <div class="hub-node">
-            <svg viewBox="0 0 28 28" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <svg viewBox="0 0 28 28" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
               <path d="M4 9h6l4 5 4-5h6M4 19h6l4-5 4 5h6"></path>
               <circle cx="14" cy="14" r="3"></circle>
             </svg>
             <strong>Núcleo determinista</strong>
-            <span>Agente QA ∥ SecOps → REN-001.v2 → HITL</span>
+            <span id="hub-line">QA + SecOps en paralelo</span>
+            <span>Dictamen <code>REN-001.v2</code> con revisión humana</span>
           </div>
         </div>
 
         <div class="corridor-wing">
-          <h3 class="wing-heading">Línea CloudOps · Nube y gobierno</h3>
-          <ol class="station-list" id="loop-cloudops"></ol>
+          <h3 class="wing-heading" data-line="cloudops"><span class="line-bullet" aria-hidden="true">CO</span>Línea CloudOps · Nube y gobierno</h3>
+          <ol class="station-list" id="loop-cloudops" data-line="cloudops"></ol>
         </div>
       </div>
 
@@ -222,9 +265,15 @@
           </div>
           <div class="inspector-controls">
             <div class="inspector-version-tabs" id="inspector-version-tabs" role="group" aria-label="Versión inspeccionada en esta etapa"></div>
-            <button type="button" class="btn-ghost" id="inspector-prev-btn" aria-label="Etapa anterior">← Anterior</button>
-            <button type="button" class="btn-ghost" id="inspector-next-btn" aria-label="Etapa siguiente">Siguiente →</button>
-            <button type="button" class="btn-ghost" id="inspector-close-btn">Cerrar (Esc)</button>
+            <button type="button" class="btn-ghost" id="inspector-prev-btn" aria-label="Etapa anterior">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9.8 3.8 5.6 8l4.2 4.2"></path></svg>
+              <span>Anterior</span>
+            </button>
+            <button type="button" class="btn-ghost" id="inspector-next-btn" aria-label="Etapa siguiente">
+              <span>Siguiente</span>
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6.2 3.8 10.4 8l-4.2 4.2"></path></svg>
+            </button>
+            <button type="button" class="btn-ghost" id="inspector-close-btn">Cerrar<span class="kbd-hint"> (Esc)</span></button>
           </div>
         </div>
         <div class="inspector-body" id="stage-inspector-body"></div>
@@ -235,21 +284,20 @@
       <div class="results-head">
         <div>
           <h2 id="results-title">Matriz comparativa de entregas</h2>
-          <p class="section-sub">Contrasta en paralelo una entrega conforme (<code>v1</code>), una regresión funcional (<code>v2</code>) y una brecha silenciosa de cobertura (<code>v3</code>).</p>
-        </div>
-        <div class="status-banner" id="status-banner" data-tone="idle">
-          <span class="status-dot" aria-hidden="true"></span>
-          <p id="status" role="status" aria-live="polite">Listo para ejecutar evaluación</p>
+          <p class="section-sub">Las tres entregas lado a lado, etapa por etapa. El dictamen de cada una sale de su corrida, no de su nombre.</p>
         </div>
       </div>
 
+      <section class="shared-stages" id="shared-stages" aria-label="Etapas comunes a las entregas comparadas" hidden></section>
+
       <div class="cards" id="results" data-visible-count="3" aria-busy="false"></div>
+      <div class="matrix-close" id="matrix-close" role="region" aria-label="Cierre de la matriz" hidden></div>
     </section>
   </main>
 
   <footer class="site-footer frame">
     <p>NextGen DevSecOps Assessment · Evaluación continua con Microsoft Agent Framework, Azure AI Foundry, seguridad en origen y gobernanza humana auditable.</p>
-    <p class="footer-shortcuts">Atajos: <kbd>R</kbd> Evaluar · <kbd>D</kbd> Solo brechas · <kbd>1</kbd>–<kbd>8</kbd> Etapas · <kbd>?</kbd> Guía</p>
+    <p class="footer-shortcuts kbd-hint">Atajos (desactivables en la guía): <kbd>R</kbd> Ir a evaluar · <kbd>D</kbd> Solo brechas · <kbd>1</kbd>–<kbd>8</kbd> Etapas · <kbd>V</kbd> Versión · <kbd>?</kbd> Guía</p>
   </footer>
 
   <template id="version-card">
@@ -276,11 +324,14 @@
 
       <div class="card-band card-proof-band"></div>
       <div class="card-band stages"></div>
-      <div class="card-band evidence"></div>
 
-      <div class="card-band card-footer-band">
-        <div class="governance"></div>
-        <div class="downloads"></div>
+      <div class="card-tail">
+        <div class="card-band card-footer-band">
+          <div class="governance"></div>
+          <div class="downloads"></div>
+        </div>
+
+        <div class="card-band evidence"></div>
       </div>
     </article>
   </template>
