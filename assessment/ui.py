@@ -17,7 +17,14 @@ from .__main__ import ROOT, apply_closure, apply_decision, apply_reopen, assess_
 from .analytics import build_powerbi_metrics, render_powerbi_csv
 from .demo_reset import execute_demo_reset, list_archived_sessions, restore_latest_archive
 from .integrations import load_settings
-from .remediation import generate_remediation
+from .remediation import (
+    apply_local_remediation,
+    close_github_remediation_prs,
+    create_github_remediation_pr,
+    generate_remediation,
+    public_remediation_state,
+    revert_local_remediation,
+)
 from .workflow import DecisionAlreadyResolved
 
 STATIC = Path(__file__).with_name("static")
@@ -245,6 +252,7 @@ class DemoHandler(BaseHTTPRequestHandler):
                 "ultimos": latest_reports(OUTPUT),
                 "analitica": build_powerbi_metrics(OUTPUT)["kpis"],
                 "archivos_demo": list_archived_sessions(OUTPUT),
+                "remediacion_activa": public_remediation_state(OUTPUT),
             })
             return
         if clean_path == "/api/metricas-powerbi.json":
@@ -275,6 +283,18 @@ class DemoHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/remediacion":
             self._handle_remediation()
+            return
+        if self.path == "/api/remediacion/aplicar":
+            self._handle_remediation_apply()
+            return
+        if self.path == "/api/remediacion/revertir":
+            self._handle_remediation_revert()
+            return
+        if self.path == "/api/remediacion/pr":
+            self._handle_remediation_pr()
+            return
+        if self.path == "/api/remediacion/pr/cerrar":
+            self._handle_remediation_pr_close()
             return
         if self.path == "/api/demo/reiniciar":
             self._handle_demo_reset()
@@ -365,18 +385,137 @@ class DemoHandler(BaseHTTPRequestHandler):
             return
         self.send_json(200, draft)
 
+    def _handle_remediation_apply(self) -> None:
+        try:
+            payload = self._read_json_body(16384)
+            run_id = payload["ejecucion"]
+            mode = payload.get("modo", "solo-evidencia")
+            use_ai = bool(payload.get("usar_ia", False))
+            custom_code = payload.get("codigo")
+            if not re.fullmatch(r"[0-9a-f]{32}", str(run_id)) or mode not in ("solo-evidencia", "agente"):
+                raise ValueError
+            if custom_code is not None and not isinstance(custom_code, str):
+                raise ValueError
+        except (ValueError, KeyError, TypeError):
+            self.send_json(400, {"error": "Parámetros inválidos para aplicar la remediación local."})
+            return
+        try:
+            with EVAL_LOCK:
+                applied = asyncio.run(
+                    apply_local_remediation(ROOT, OUTPUT, run_id, use_ai=use_ai, custom_code=custom_code)
+                )
+                version = applied["version"]
+                current_sb = _probe_local_sandbox()
+                if current_sb.get("activo") and current_sb.get("version") == version:
+                    start_sandbox(version)
+                report = asyncio.run(assess_project(ROOT / version, OUTPUT, mode == "agente"))
+        except FileNotFoundError:
+            self.send_json(404, {"error": "No se encontró la ejecución indicada."})
+            return
+        except ValueError as exc:
+            self.send_json(400, {"error": str(exc)})
+            return
+        except Exception as exc:
+            self.send_json(500, {"error": f"No se pudo aplicar la remediación ni reevaluar: {exc}"})
+            return
+        self.send_json(200, {
+            "aplicacion": applied,
+            "informe": _format_summary(report),
+            "analitica": build_powerbi_metrics(OUTPUT)["kpis"],
+            "remediacion_activa": public_remediation_state(OUTPUT),
+        })
+
+    def _handle_remediation_revert(self) -> None:
+        try:
+            payload = self._read_json_body(512)
+            version = payload["version"]
+            mode = payload.get("modo", "solo-evidencia")
+            reevaluate = bool(payload.get("reevaluar", True))
+            if version not in ("v2", "v3") or mode not in ("solo-evidencia", "agente"):
+                raise ValueError
+        except (ValueError, KeyError, TypeError):
+            self.send_json(400, {"error": "Indicá una versión válida (v2 o v3) para revertir su código."})
+            return
+        try:
+            with EVAL_LOCK:
+                reverted = revert_local_remediation(ROOT, OUTPUT, version=version)
+                current_sb = _probe_local_sandbox()
+                if current_sb.get("activo") and current_sb.get("version") == version:
+                    start_sandbox(version)
+                report = asyncio.run(assess_project(ROOT / version, OUTPUT, mode == "agente")) if reevaluate else None
+        except Exception as exc:
+            self.send_json(500, {"error": f"No se pudo revertir el código original: {exc}"})
+            return
+        self.send_json(200, {
+            "archivos_revertidos": reverted,
+            "informe": _format_summary(report) if report else None,
+            "analitica": build_powerbi_metrics(OUTPUT)["kpis"],
+            "remediacion_activa": public_remediation_state(OUTPUT),
+        })
+
+    def _handle_remediation_pr(self) -> None:
+        try:
+            payload = self._read_json_body(16384)
+            run_id = payload["ejecucion"]
+            use_ai = bool(payload.get("usar_ia", False))
+            custom_code = payload.get("codigo")
+            if not re.fullmatch(r"[0-9a-f]{32}", str(run_id)):
+                raise ValueError
+            if custom_code is not None and not isinstance(custom_code, str):
+                raise ValueError
+        except (ValueError, KeyError, TypeError):
+            self.send_json(400, {"error": "Solicitud inválida para crear Pull Request de remediación."})
+            return
+        try:
+            with EVAL_LOCK:
+                res = asyncio.run(
+                    create_github_remediation_pr(ROOT, OUTPUT, run_id, use_ai=use_ai, custom_code=custom_code)
+                )
+        except FileNotFoundError:
+            self.send_json(404, {"error": "No se encontró la ejecución indicada."})
+            return
+        except ValueError as exc:
+            self.send_json(400, {"error": str(exc)})
+            return
+        except Exception as exc:
+            self.send_json(500, {"error": f"No se pudo crear el Pull Request en GitHub: {exc}"})
+            return
+        self.send_json(200, res)
+
+    def _handle_remediation_pr_close(self) -> None:
+        try:
+            payload = self._read_json_body(512)
+            version = payload.get("version")
+            if version is not None and version not in ("v2", "v3"):
+                raise ValueError
+        except (ValueError, TypeError):
+            self.send_json(400, {"error": "Parámetros inválidos para cerrar el PR de demostración."})
+            return
+        try:
+            with EVAL_LOCK:
+                closed = close_github_remediation_prs(OUTPUT, version=version)
+        except Exception as exc:
+            self.send_json(500, {"error": f"No se pudo cerrar el PR efímero: {exc}"})
+            return
+        self.send_json(200, {
+            "prs_cerrados": closed,
+            "remediacion_activa": public_remediation_state(OUTPUT),
+        })
+
     def _handle_demo_reset(self) -> None:
         try:
             payload = self._read_json_body(512)
             reset_runs = bool(payload.get("corridas", True))
             reset_sandbox = bool(payload.get("sandbox", True))
             reset_boards = bool(payload.get("boards", False))
+            reset_code = bool(payload.get("codigo", True))
+            reset_prs = bool(payload.get("prs", True))
         except (ValueError, TypeError):
             self.send_json(400, {"error": "Parámetros de reinicio de demostración inválidos."})
             return
         try:
             with EVAL_LOCK:
-                if reset_sandbox:
+                if reset_sandbox or reset_code:
                     stop_sandbox()
                 res = execute_demo_reset(
                     ROOT,
@@ -384,6 +523,8 @@ class DemoHandler(BaseHTTPRequestHandler):
                     reset_runs=reset_runs,
                     reset_sandbox=reset_sandbox,
                     reset_boards=reset_boards,
+                    reset_code=reset_code,
+                    reset_github_prs=reset_prs,
                 )
         except Exception as exc:
             self.send_json(500, {"error": f"No se pudo reiniciar el estado de demostración: {exc}"})
@@ -393,6 +534,7 @@ class DemoHandler(BaseHTTPRequestHandler):
             "ultimos": latest_reports(OUTPUT),
             "analitica": build_powerbi_metrics(OUTPUT)["kpis"],
             "sandbox": _probe_local_sandbox(),
+            "remediacion_activa": public_remediation_state(OUTPUT),
         })
 
     def _handle_demo_restore(self) -> None:

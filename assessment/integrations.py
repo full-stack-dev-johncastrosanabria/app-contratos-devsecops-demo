@@ -238,10 +238,22 @@ def fetch_github_context(settings: dict[str, str], commit_sha: str | None) -> di
     out: dict = {"disponible": True, "repositorio": repo, "url_repositorio": f"https://github.com/{repo}"}
     try:
         pulls = _http_json("GET", f"{base}/pulls?state=all&per_page=20", headers)
-        human_pulls = [p for p in pulls if "dependabot" not in ((p.get("user") or {}).get("login") or "").lower()]
-        pr = next(
-            (p for p in human_pulls if "AB#" in (p.get("body") or "") or "AB#" in (p.get("title") or "")),
-            human_pulls[0] if human_pulls else (pulls[0] if pulls else None),
+        human_pulls = [
+            p for p in pulls
+            if "dependabot" not in ((p.get("user") or {}).get("login") or "").lower()
+            and not (((p.get("head") or {}).get("ref") or "").startswith("demo/remediacion-"))
+        ]
+        merged_ab = [
+            p for p in human_pulls
+            if p.get("merged_at") and ("AB#" in (p.get("body") or "") or "AB#" in (p.get("title") or ""))
+        ]
+        pr = (
+            merged_ab[0]
+            if merged_ab
+            else next(
+                (p for p in human_pulls if "AB#" in (p.get("body") or "") or "AB#" in (p.get("title") or "")),
+                human_pulls[0] if human_pulls else (pulls[0] if pulls else None),
+            )
         )
         if pr:
             ab_refs = sorted(set(re.findall(r"AB#\d+", f"{pr.get('title', '')} {pr.get('body', '')}")))

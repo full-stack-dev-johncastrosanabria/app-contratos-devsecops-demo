@@ -69,8 +69,18 @@ class DemoHTTP(unittest.TestCase):
                     self.assertEqual(request("GET", "/.env")[0], 404)
                     assess.assert_awaited_once()
 
+                    with (patch("assessment.ui.apply_local_remediation", return_value={"aplicado": True, "version": "v2", "archivo": "v2/src/Contratos/Renovaciones.cs"}),
+                          patch("assessment.ui.revert_local_remediation", return_value=["v2/src/Contratos/Renovaciones.cs"]),
+                          patch("assessment.ui.create_github_remediation_pr", return_value={"operacion": "creado", "pr": {"numero": 15, "url": "https://github.com/demo/pull/15"}, "estado_remediacion": {"parches_locales": {}, "prs_efimeros": {}}}),
+                          patch("assessment.ui.close_github_remediation_prs", return_value=[{"version": "v2", "numero": 15}])):
+                        self.assertEqual(request("POST", "/api/remediacion/aplicar", json.dumps({"ejecucion": run_id, "modo": "solo-evidencia"}), origin)[0], 200)
+                        self.assertEqual(request("POST", "/api/remediacion/revertir", '{"version":"v2","modo":"solo-evidencia"}', origin)[0], 200)
+                        self.assertEqual(request("POST", "/api/remediacion/pr", json.dumps({"ejecucion": run_id}), origin)[0], 200)
+                        self.assertEqual(request("POST", "/api/remediacion/pr/cerrar", '{"version":"v2"}', origin)[0], 200)
+                    self.assertEqual(assess.await_count, 3)
+
                     # Reversible demo reset & restore over HTTP
-                    st_rst, rst_body = request("POST", "/api/demo/reiniciar", '{"corridas":true,"sandbox":false,"boards":false}', origin)
+                    st_rst, rst_body = request("POST", "/api/demo/reiniciar", '{"corridas":true,"sandbox":false,"boards":false,"codigo":false,"prs":false}', origin)
                     self.assertEqual(st_rst, 200)
                     self.assertEqual(json.loads(rst_body)["reinicio"]["corridas"]["archivadas"], 1)
                     st_undo, undo_body = request("POST", "/api/demo/restaurar", "{}", origin)

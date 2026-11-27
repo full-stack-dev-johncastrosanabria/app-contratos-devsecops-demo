@@ -19,6 +19,7 @@ const demoRestoreBtn = document.querySelector("#demo-restore-btn");
 const resetRunsChk = document.querySelector("#reset-runs-chk");
 const resetSandboxChk = document.querySelector("#reset-sandbox-chk");
 const resetBoardsChk = document.querySelector("#reset-boards-chk");
+const resetCodePrsChk = document.querySelector("#reset-code-prs-chk");
 
 const sandboxPill = document.querySelector("#sandbox-pill");
 const sandboxText = document.querySelector("#sandbox-text");
@@ -265,6 +266,7 @@ const reportsByVersion = new Map();
 const provenanceByVersion = new Map();
 
 let cachedLatest = {};
+let activeRemediationState = { parches_locales: {}, prs_efimeros: {} };
 let activeController = null;
 let filterDiffOnly = false;
 let inspectedStage = null;
@@ -1353,17 +1355,18 @@ function clearAllCardsToIdle() {
 
 demoResetApplyBtn?.addEventListener("click", async () => {
   if (activeController) return;
+  const resetCodeAndPrs = Boolean(resetCodePrsChk?.checked);
   const resetRuns = Boolean(resetRunsChk?.checked);
   const resetSb = Boolean(resetSandboxChk?.checked);
   const resetBd = Boolean(resetBoardsChk?.checked);
-  if (!resetRuns && !resetSb && !resetBd) {
+  if (!resetCodeAndPrs && !resetRuns && !resetSb && !resetBd) {
     setStatus("Selecciona al menos un componente para reiniciar la demostración.", "warn");
     return;
   }
   if (demoResetApplyBtn.dataset.armed !== "true") {
     arm(
       demoResetApplyBtn,
-      resetBd ? "Confirmar reinicio local + Azure Boards" : "Confirmar reinicio reversible"
+      resetBd ? "Confirmar reinicio local + GitHub + Boards" : "Confirmar reinicio reversible"
     );
     announce("Pulsa otra vez para confirmar el reinicio reversible de la demostración.");
     return;
@@ -1375,19 +1378,38 @@ demoResetApplyBtn?.addEventListener("click", async () => {
     const res = await fetch("/api/demo/reiniciar", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ corridas: resetRuns, sandbox: resetSb, boards: resetBd }),
+      body: JSON.stringify({
+        corridas: resetRuns,
+        sandbox: resetSb,
+        boards: resetBd,
+        codigo: resetCodeAndPrs,
+        prs: resetCodeAndPrs,
+      }),
     });
     const data = await readJson(res);
     if (!res.ok) throw new Error(data.error || "No se pudo reiniciar el entorno de demostración.");
-    if (resetRuns) clearAllCardsToIdle();
+    if (data.remediacion_activa) activeRemediationState = data.remediacion_activa;
+    if (resetRuns) {
+      clearAllCardsToIdle();
+    } else {
+      for (const ver of versions) {
+        const rep = reportsByVersion.get(ver);
+        if (rep) renderRemediation(cards.get(ver), ver, rep);
+      }
+    }
     if (data.analitica) renderValueKpis(data.analitica);
     if (data.sandbox) updateSandboxBanner(data.sandbox);
     syncArchiveRestoreButton(data.reinicio?.archivos_disponibles || []);
     const archivedCount = data.reinicio?.corridas?.archivadas || 0;
+    const revertedFiles = data.reinicio?.codigo_revertido?.length || 0;
+    const closedPrs = data.reinicio?.prs_cerrados?.length || 0;
     const boardsRemoved = data.reinicio?.boards?.cantidad_tareas_retiradas;
-    const boardsMsg = typeof boardsRemoved === "number" ? ` · ${boardsRemoved} tarea(s) demo retiradas en Boards` : "";
+    const extras = [];
+    if (revertedFiles) extras.push(`${revertedFiles} archivo(s) C# restaurados`);
+    if (closedPrs) extras.push(`${closedPrs} PR(s) demo cerrados`);
+    if (typeof boardsRemoved === "number") extras.push(`${boardsRemoved} tarea(s) demo retiradas en Boards`);
     setStatus(
-      `Entorno listo para nueva demo (${archivedCount} corrida(s) archivadas de forma reversible${boardsMsg}).`,
+      `Entorno listo para nueva demo (${archivedCount} corrida(s) archivadas${extras.length ? ` · ${extras.join(" · ")}` : ""}).`,
       "pass"
     );
     setDemoResetOpen(false);
@@ -2275,16 +2297,110 @@ function renderRemediation(card, version, report) {
   if (!container) return;
   container.replaceChildren();
   const runId = report.ejecucion?.id;
-  if (!runId || report.veredicto === "VERIFICADO") return;
+  const localPatch = activeRemediationState.parches_locales?.[version];
+  const ephemeralPr = activeRemediationState.prs_efimeros?.[version];
+  const hasGap = Boolean(runId && report.veredicto !== "VERIFICADO");
+
+  if (!hasGap && !localPatch && !ephemeralPr) return;
 
   const panel = element("div", null, "rem-panel");
   const head = element("div", null, "rem-head");
   const title = element("span", null, "gov-heading");
-  title.append(svgIcon("info", 14), element("span", "Asistente de remediación · C# / xUnit"));
+  title.append(svgIcon("info", 14), element("span", "Remediación de código · C# / GitOps"));
   head.append(title);
+  panel.append(head);
+
+  if (localPatch) {
+    const patchBanner = element("div", null, "rem-state-banner");
+    patchBanner.dataset.tone = "pass";
+    patchBanner.append(
+      element("span", `Código aplicado en local (${localPatch.archivo}) · respaldo original guardado`)
+    );
+    const revertBtn = element("button", "Revertir código original y reevaluar", "btn-secondary");
+    revertBtn.type = "button";
+    revertBtn.addEventListener("click", async () => {
+      if (activeController) return;
+      if (revertBtn.dataset.armed !== "true") {
+        arm(revertBtn, "¿Restaurar C# original? Pulsa otra vez");
+        return;
+      }
+      disarm(revertBtn);
+      revertBtn.disabled = true;
+      setStatus(`Restaurando archivo C# original de ${version} y reevaluando con dotnet test…`, "busy");
+      try {
+        const res = await fetch("/api/remediacion/revertir", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ version, modo: form.elements.modo.value, reevaluar: true }),
+        });
+        const data = await readJson(res);
+        if (!res.ok) throw new Error(data.error || "No se pudo revertir el archivo C#.");
+        if (data.remediacion_activa) activeRemediationState = data.remediacion_activa;
+        if (data.analitica) renderValueKpis(data.analitica);
+        if (data.informe) {
+          cachedLatest[version] = { ...data.informe, registrado_ms: Date.now() };
+          showReport(card, version, data.informe, { isLive: true, timestampMs: Date.now(), stamp: true });
+        }
+        setStatus(`Código original de ${version} restaurado y reevaluado (${data.informe?.veredicto || "OK"}).`, "pass");
+      } catch (err) {
+        revertBtn.disabled = false;
+        setStatus(describeFetchError(err, "No se pudo revertir la remediación local."), "error");
+      }
+    });
+    patchBanner.append(revertBtn);
+    panel.append(patchBanner);
+  }
+
+  if (ephemeralPr) {
+    const prBanner = element("div", null, "rem-state-banner");
+    const prCopy = element("span");
+    prCopy.append("Pull Request efímero abierto en GitHub: ");
+    const prLink = document.createElement("a");
+    prLink.href = ephemeralPr.url;
+    prLink.target = "_blank";
+    prLink.rel = "noopener";
+    prLink.append(
+      element("span", `PR #${ephemeralPr.numero} (${ephemeralPr.rama})`),
+      element("span", " (se abre en una nueva pestaña)", "sr-only")
+    );
+    prCopy.append(prLink);
+    const closePrBtn = element("button", "Cerrar PR y borrar rama", "btn-ghost");
+    closePrBtn.type = "button";
+    closePrBtn.addEventListener("click", async () => {
+      if (closePrBtn.dataset.armed !== "true") {
+        arm(closePrBtn, "¿Cerrar PR demo? Pulsa otra vez");
+        return;
+      }
+      disarm(closePrBtn);
+      closePrBtn.disabled = true;
+      setStatus(`Cerrando PR #${ephemeralPr.numero} y eliminando rama ${ephemeralPr.rama} en GitHub…`, "busy");
+      try {
+        const res = await fetch("/api/remediacion/pr/cerrar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ version }),
+        });
+        const data = await readJson(res);
+        if (!res.ok) throw new Error(data.error || "No se pudo cerrar el PR en GitHub.");
+        if (data.remediacion_activa) activeRemediationState = data.remediacion_activa;
+        renderRemediation(card, version, report);
+        setStatus(`PR #${ephemeralPr.numero} cerrado y rama efímera eliminada de GitHub.`, "pass");
+      } catch (err) {
+        closePrBtn.disabled = false;
+        setStatus(describeFetchError(err, "No se pudo cerrar el PR efímero en GitHub."), "error");
+      }
+    });
+    prBanner.append(prCopy, closePrBtn);
+    panel.append(prBanner);
+  }
+
+  if (!hasGap) {
+    container.append(panel);
+    return;
+  }
 
   const actions = element("div", null, "rem-actions");
-  const detBtn = element("button", "Borrador determinista · 0 tokens", "btn-secondary");
+  const detBtn = element("button", "Ver borrador · 0 tokens", "btn-secondary");
   detBtn.type = "button";
   const aiBtn = element("button", "Generar con Azure AI Foundry", "btn-ghost");
   aiBtn.type = "button";
@@ -2292,6 +2408,92 @@ function renderRemediation(card, version, report) {
 
   const outBox = element("div", null, "rem-output");
   outBox.hidden = true;
+  let latestSnippet = null;
+  let latestUsedAi = false;
+
+  const buildExecutionBar = () => {
+    const execBar = element("div", null, "rem-exec-bar");
+    const applyLocalBtn = element("button", "Aplicar en local y reevaluar", "btn-approve");
+    applyLocalBtn.type = "button";
+    applyLocalBtn.addEventListener("click", async () => {
+      if (activeController) return;
+      if (applyLocalBtn.dataset.armed !== "true") {
+        arm(applyLocalBtn, `Confirmar escritura en ${version} y dotnet test`);
+        return;
+      }
+      disarm(applyLocalBtn);
+      applyLocalBtn.disabled = true;
+      openPrBtn.disabled = true;
+      setStatus(`Aplicando cambio C# en ${version} con respaldo reversible y ejecutando dotnet test…`, "busy");
+      try {
+        const res = await fetch("/api/remediacion/aplicar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ejecucion: runId,
+            modo: form.elements.modo.value,
+            usar_ia: latestUsedAi,
+            codigo: latestSnippet,
+          }),
+        });
+        const data = await readJson(res);
+        if (!res.ok) throw new Error(data.error || "No se pudo aplicar la remediación local.");
+        if (data.remediacion_activa) activeRemediationState = data.remediacion_activa;
+        if (data.analitica) renderValueKpis(data.analitica);
+        if (data.informe) {
+          cachedLatest[version] = { ...data.informe, registrado_ms: Date.now() };
+          showReport(card, version, data.informe, { isLive: true, timestampMs: Date.now(), stamp: true });
+        }
+        setStatus(
+          `Remediación aplicada en ${data.aplicacion?.archivo || version}: nuevo dictamen ${data.informe?.veredicto || "VERIFICADO"}.`,
+          "pass"
+        );
+      } catch (err) {
+        applyLocalBtn.disabled = false;
+        openPrBtn.disabled = false;
+        setStatus(describeFetchError(err, "No se pudo aplicar la remediación ni reevaluar."), "error");
+      }
+    });
+
+    const openPrBtn = element("button", "Crear rama y PR en GitHub", "btn-secondary");
+    openPrBtn.type = "button";
+    openPrBtn.addEventListener("click", async () => {
+      if (openPrBtn.dataset.armed !== "true") {
+        arm(openPrBtn, "Confirmar creación de rama + PR en GitHub");
+        return;
+      }
+      disarm(openPrBtn);
+      openPrBtn.disabled = true;
+      applyLocalBtn.disabled = true;
+      setStatus(`Creando rama efímera y Pull Request real en GitHub para ${version}…`, "busy");
+      try {
+        const res = await fetch("/api/remediacion/pr", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ejecucion: runId,
+            usar_ia: latestUsedAi,
+            codigo: latestSnippet,
+          }),
+        });
+        const data = await readJson(res);
+        if (!res.ok) throw new Error(data.error || "No se pudo abrir el Pull Request en GitHub.");
+        if (data.remediacion_activa) activeRemediationState = data.remediacion_activa;
+        renderRemediation(card, version, report);
+        setStatus(
+          `Pull Request #${data.pr?.numero} (${data.operacion}) en GitHub con vínculo AB#1.`,
+          "pass"
+        );
+      } catch (err) {
+        openPrBtn.disabled = false;
+        applyLocalBtn.disabled = false;
+        setStatus(describeFetchError(err, "No se pudo crear el Pull Request en GitHub."), "error");
+      }
+    });
+
+    execBar.append(applyLocalBtn, openPrBtn);
+    return execBar;
+  };
 
   const loadDraft = async (useAi, triggerBtn) => {
     if (useAi && !confirmPaidRun(triggerBtn, 1, "agente")) return;
@@ -2309,12 +2511,14 @@ function renderRemediation(card, version, report) {
       });
       const draft = await readJson(res);
       if (!res.ok) throw new Error(draft.error || "No se pudo generar el borrador de remediación.");
+      latestSnippet = draft.codigo_sugerido;
+      latestUsedAi = useAi;
       outBox.replaceChildren();
       const sourceLabel = draft.origen === "agente_ia"
         ? `Generado por IA (${draft.proveedor || "Foundry"})`
         : "Plantilla determinista verificada (0 tokens)";
       outBox.append(
-        element("p", `${sourceLabel} · Archivo sugerido: ${draft.archivo_objetivo}`, "rem-file"),
+        element("p", `${sourceLabel} · Archivo objetivo: ${draft.archivo_objetivo}`, "rem-file"),
         element("p", draft.explicacion, "source-ref-line")
       );
       if (draft.nota_ia) outBox.append(element("p", draft.nota_ia, "rem-disclaimer"));
@@ -2342,9 +2546,9 @@ function renderRemediation(card, version, report) {
       pre.append(code);
       copyWrap.append(copySpan, pre);
 
-      outBox.append(copyWrap, element("p", draft.advertencia, "rem-disclaimer"));
+      outBox.append(copyWrap, buildExecutionBar(), element("p", draft.advertencia, "rem-disclaimer"));
       outBox.hidden = false;
-      setStatus(`Borrador de remediación listo para ${version}.`, "pass");
+      setStatus(`Borrador listo para ${version}: podés copiarlo, aplicarlo en local o crear PR en GitHub.`, "pass");
     } catch (err) {
       setStatus(describeFetchError(err, "No se pudo generar el borrador de remediación."), "error");
     } finally {
@@ -2356,7 +2560,7 @@ function renderRemediation(card, version, report) {
   detBtn.addEventListener("click", () => loadDraft(false, detBtn));
   aiBtn.addEventListener("click", () => loadDraft(true, aiBtn));
 
-  panel.append(head, actions, outBox);
+  panel.append(actions, outBox);
   container.append(panel);
 }
 
@@ -2723,6 +2927,7 @@ async function initEcosystem() {
     const data = await readJson(res);
     const eco = data.ecosistema || {};
     cachedLatest = data.ultimos || {};
+    if (data.remediacion_activa) activeRemediationState = data.remediacion_activa;
     if (data.analitica) renderValueKpis(data.analitica);
     syncArchiveRestoreButton(data.archivos_demo || []);
 

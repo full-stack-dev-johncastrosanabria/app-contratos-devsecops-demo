@@ -21,7 +21,13 @@ from assessment.demo_reset import execute_demo_reset, restore_latest_archive
 from assessment.evidence import APP, CRITERION, PROJECT, collect, read_cobertura
 from assessment.integrations import audit_repo_governance, parse_boards_criteria
 from assessment.policy import evaluate, evaluate_criteria_matrix, source_tests
-from assessment.remediation import generate_remediation
+from assessment.remediation import (
+    apply_local_remediation,
+    close_github_remediation_prs,
+    create_github_remediation_pr,
+    generate_remediation,
+    revert_local_remediation,
+)
 from assessment.workflow import (
     AZURE_KEYS,
     AnthropicClient,
@@ -487,6 +493,69 @@ class DevSecOpsRegression(unittest.TestCase):
             restored_res = restore_latest_archive(runs_dir)
             self.assertEqual(restored_res["corridas_restauradas"], 2)
             self.assertEqual(build_powerbi_metrics(runs_dir)["kpis"]["corridas_totales"], 2)
+
+            # Live local C# apply + real dotnet test verification + byte-exact revert on v2 & v3
+            sandbox_repo = base / "live_repo"
+            for ver, initial_verdict in (("v2", "INCUMPLIDO"), ("v3", "EVIDENCIA_INSUFICIENTE")):
+                copy_version(ROOT / ver, sandbox_repo / ver)
+                rel_cs = "src/Contratos/Renovaciones.cs" if ver == "v2" else "tests/Contratos.Tests/RenovacionesTests.cs"
+                orig_bytes = (sandbox_repo / ver / rel_cs).read_bytes()
+                rid = (ver * 16)[:32]
+                rdir = runs_dir / rid
+                rdir.mkdir(parents=True, exist_ok=True)
+                (rdir / "informe.json").write_text(json.dumps({
+                    "criterio": CRITERION,
+                    "veredicto": initial_verdict,
+                    "justificacion": "Brecha detectada",
+                    "ejecucion": {"id": rid, "version": ver},
+                }), encoding="utf-8")
+
+                applied = asyncio.run(apply_local_remediation(sandbox_repo, runs_dir, rid, use_ai=False))
+                self.assertTrue(applied["aplicado"])
+                ev_after = collect(sandbox_repo / ver, base / f"after_{ver}")
+                tests_after = source_tests(ev_after.sources)
+                verd_after = evaluate(ev_after, tests_after)
+                self.assertEqual(verd_after["veredicto"], "VERIFICADO", f"{ver} no pasó tras remediación")
+                mat_after = evaluate_criteria_matrix(ev_after, tests_after, verd_after)
+                self.assertEqual(mat_after["cobertura"]["criterios_verificados"], 2)
+
+                # Ephemeral GitOps PR create & reversible close
+                gh_calls = []
+
+                def fake_gh_json(method, url, headers, body=None, timeout=15):
+                    gh_calls.append((method, url))
+                    if url.endswith("/git/ref/heads/main"):
+                        return {"object": {"sha": "1" * 40}}
+                    if "/git/commits/" in url:
+                        return {"tree": {"sha": "2" * 40}}
+                    if url.endswith("/git/trees"):
+                        return {"sha": "3" * 40}
+                    if url.endswith("/git/commits"):
+                        return {"sha": "4" * 40}
+                    if url.endswith("/git/refs"):
+                        return {"ref": body["ref"]}
+                    if url.endswith("/pulls"):
+                        return {"number": 42, "html_url": "https://github.com/org/repo/pull/42"}
+                    return {"state": "closed"}
+
+                with (patch("assessment.remediation._gh_token", return_value="gho_fake"),
+                      patch("assessment.remediation._http_json", side_effect=fake_gh_json),
+                      patch("assessment.remediation._http_no_body", return_value=204)):
+                    pr_created = asyncio.run(
+                        create_github_remediation_pr(
+                            sandbox_repo, runs_dir, rid, settings={"GITHUB_REPO": "org/repo"}
+                        )
+                    )
+                    self.assertEqual(pr_created["operacion"], "creado")
+                    self.assertEqual(pr_created["pr"]["numero"], 42)
+                    closed_prs = close_github_remediation_prs(
+                        runs_dir, version=ver, settings={"GITHUB_REPO": "org/repo"}
+                    )
+                    self.assertEqual(len(closed_prs), 1)
+
+                reverted_list = revert_local_remediation(sandbox_repo, runs_dir, version=ver)
+                self.assertEqual(len(reverted_list), 1)
+                self.assertEqual((sandbox_repo / ver / rel_cs).read_bytes(), orig_bytes)
 
 
 if __name__ == "__main__":

@@ -197,14 +197,24 @@ def execute_demo_reset(
     reset_runs: bool = True,
     reset_sandbox: bool = True,
     reset_boards: bool = False,
+    reset_code: bool = True,
+    reset_github_prs: bool = True,
 ) -> dict:
+    from .remediation import close_github_remediation_prs, revert_local_remediation
+
     summary: dict = {
         "ejecutado_en": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "corridas": {"archivadas": 0, "sesion_archivo": None},
         "sandbox_archivos_limpiados": [],
+        "codigo_revertido": [],
+        "prs_cerrados": [],
         "boards": None,
         "archivos_disponibles": [],
     }
+    if reset_code:
+        summary["codigo_revertido"] = revert_local_remediation(repo_root, runs_dir, version=None)
+    if reset_github_prs:
+        summary["prs_cerrados"] = close_github_remediation_prs(runs_dir, version=None)
     if reset_sandbox:
         summary["sandbox_archivos_limpiados"] = clean_sandbox_data(repo_root)
     if reset_runs:

@@ -171,7 +171,9 @@ Dejá abiertas estas 4 pestañas en una ventana limpia (con zoom al `110%`–`12
 6. **Etapa 6 · Operar (`Microsoft Defender for Cloud`):** Consulta en vivo del **Secure Score (%)** en Azure Resource Graph, HTTPS exclusivo e identidad administrada `SystemAssigned` habilitada en `ca-appcontratos`.
 7. **Etapa 7 · Observar y aprender (`Azure Monitor + App Insights + Log Analytics + Power BI`):** Comparación KQL reciente (`1h`) vs línea base (`23h previas`) y franja **Valor continuo** con descarga directa de dataset CSV/JSON para **Power BI** y **Microsoft Fabric** (`/api/metricas-powerbi.csv`).
 8. **Etapa 8 · Optimizar con IA (`Fabric + Azure AI Foundry + Microsoft Security Copilot`):**
-   - **Asistente de remediación C#** en cada expediente con brecha (`0 tokens` determinista o generado con `Azure AI Foundry`), con botón de copiado accesible.
+   - **Remediación ejecutable de código C# y GitOps (100 % reversible):** en cada expediente con brecha (`v2` o `v3`), podés generar el código con `0 tokens` o con `Azure AI Foundry` y elegir en vivo:
+     1. **«Aplicar en local y reevaluar»:** guarda respaldo del `.cs` original, escribe la corrección, vuelve a correr `dotnet test` y pasa la tarjeta en vivo a **`Verificado` (verde)** (habilitando además **«Cerrar tarea en Azure Boards»**). Con un clic en **«Revertir código original y reevaluar»** vuelve al fallo original.
+     2. **«Crear rama y PR en GitHub»:** crea una rama efímera `demo/remediacion-...` y abre un **Pull Request real en GitHub** vinculado a `AB#1` sin tocar tu rama `main` local; con **«Cerrar PR y borrar rama»** (o **«Reiniciar demo»**) limpia todo en GitHub.
    - **Manifiesto OpenAPI y plugin para Microsoft Security Copilot** (`/copilot/security-copilot-skill.yaml`).
    - **Gobernanza WIQL idempotente + cierre de ciclo** cuando una entrega alcanza `VERIFICADO`.
 

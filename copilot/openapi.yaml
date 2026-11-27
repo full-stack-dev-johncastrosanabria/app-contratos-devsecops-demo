@@ -84,6 +84,27 @@ paths:
       responses:
         "200":
           description: Propuesta de parche o prueba xUnit sujeta a reevaluación determinista.
+  /api/remediacion/aplicar:
+    post:
+      operationId: aplicarRemediacionLocalYReevaluar
+      summary: Aplica con respaldo reversible la remediación C# en v2 o v3 y ejecuta inmediatamente dotnet test para certificar el nuevo dictamen.
+      responses:
+        "200":
+          description: Código aplicado, respaldo guardado e informe reevaluado.
+  /api/remediacion/revertir:
+    post:
+      operationId: revertirRemediacionLocal
+      summary: Restaura el archivo .cs original de v2 o v3 desde su respaldo y reevalúa la entrega.
+      responses:
+        "200":
+          description: Archivo original restaurado y entrega reevaluada.
+  /api/remediacion/pr:
+    post:
+      operationId: crearPullRequestRemediacionGitHub
+      summary: Crea una rama efímera y un Pull Request real en GitHub con trazabilidad AB# sin modificar la rama local main.
+      responses:
+        "200":
+          description: Pull Request efímero creado en GitHub.
   /api/acciones:
     post:
       operationId: resolverAccionGobernanza

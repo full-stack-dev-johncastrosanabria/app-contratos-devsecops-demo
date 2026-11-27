@@ -6,6 +6,12 @@ from pathlib import Path
 
 from .demo_reset import execute_demo_reset, restore_latest_archive
 from .integrations import load_settings
+from .remediation import (
+    apply_local_remediation,
+    close_github_remediation_prs,
+    create_github_remediation_pr,
+    revert_local_remediation,
+)
 from .workflow import (
     DecisionAlreadyResolved,
     Request,
@@ -191,6 +197,33 @@ def main() -> int:
     if args.proyecto == "restaurar-demo":
         res = restore_latest_archive(args.salida.resolve())
         print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.proyecto == "aplicar-remediacion":
+        if not args.ejecucion:
+            parser.error("Indicá --ejecucion <id> para aplicar su remediación en local y reevaluar.")
+        applied = asyncio.run(
+            apply_local_remediation(ROOT, args.salida.resolve(), args.ejecucion, use_ai=args.modo == "agente")
+        )
+        ver = applied["version"]
+        devsecops = False if args.sin_nube else None
+        report = asyncio.run(assess_project(ROOT / ver, args.salida.resolve(), args.modo == "agente", devsecops=devsecops))
+        print(f"{ver} · código aplicado ({applied['archivo']}) · nuevo veredicto: {report['veredicto']} · {report['ejecucion']['id']}")
+        return 0
+
+    if args.proyecto == "revertir-remediacion":
+        reverted = revert_local_remediation(ROOT, args.salida.resolve(), version=None)
+        closed = [] if args.sin_nube else close_github_remediation_prs(args.salida.resolve(), version=None)
+        print(json.dumps({"archivos_revertidos": reverted, "prs_cerrados": closed}, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.proyecto == "crear-pr":
+        if not args.ejecucion:
+            parser.error("Indicá --ejecucion <id> para crear una rama y PR de remediación en GitHub.")
+        pr_res = asyncio.run(
+            create_github_remediation_pr(ROOT, args.salida.resolve(), args.ejecucion, use_ai=args.modo == "agente")
+        )
+        print(json.dumps(pr_res, ensure_ascii=False, indent=2))
         return 0
 
     if args.proyecto in ("aprobar", "descartar", "cerrar", "reabrir"):
