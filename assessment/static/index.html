@@ -76,7 +76,7 @@
             </svg>
             <span class="sr-only"> (se abre en una nueva pestaña)</span>
           </a>
-          <button type="button" class="sandbox-btn sandbox-toggle" id="sandbox-toggle" aria-expanded="false" aria-controls="sandbox-actions">Gestionar :5080</button>
+          <button type="button" class="sandbox-btn sandbox-toggle" id="sandbox-toggle" aria-expanded="false" aria-controls="sandbox-actions"><span>Gestionar :5080</span><svg class="toggle-chevron" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg></button>
         </div>
 
         <div class="sandbox-actions" id="sandbox-actions" role="group" aria-label="Puente interoperable con sujeto de prueba en puerto 5080">
@@ -101,6 +101,7 @@
       <div class="deck-header">
         <div class="deck-heading-block">
           <h1 id="title">Evaluador de renovaciones</h1>
+          <p class="deck-verdict" id="deck-verdict" aria-hidden="true" hidden></p>
           <p class="deck-rule">
             <strong>Regla auditada (<code>REN-001</code>):</strong> al evaluar renovaciones, un contrato cancelado nunca debe generar un aviso. Los agentes QA y SecOps investigan las 8 etapas en paralelo; la política determinista <code>REN-001.v2</code> valida cada evidencia contra código y TRX antes de emitir el dictamen.
           </p>
@@ -144,7 +145,7 @@
           <div class="help-col">
             <h3>Certificación REN-001.v2</h3>
             <p>Exige una prueba C# marcada con <code>[Trait("Criterio", "REN-001")]</code> que prepare un contrato cancelado, invoque la evaluación, verifique <code>Assert.Empty</code> y registre <code>Passed</code> en el XML del TRX firmado con SHA-256.</p>
-            <p class="help-glossary"><abbr title="Microsoft Agent Framework">MAF</abbr>: agentes de QA y SecOps · <abbr title="Human in the loop">HITL</abbr>: una persona aprueba o descarta cada acción · <abbr title="Visual Studio Test Results">TRX</abbr>: resultados XML de <code>dotnet test</code>. Los hallazgos SecOps de severidad alta se muestran aparte: REN-001 certifica una sola regla.</p>
+            <p class="help-glossary"><abbr title="Microsoft Agent Framework">MAF</abbr>: agentes de QA y SecOps · <abbr title="Human in the loop">HITL</abbr>: una persona aprueba o descarta cada acción · <abbr title="Visual Studio Test Results">TRX</abbr>: resultados XML de <code>dotnet test</code> · WIQL: consulta de Azure Boards que evita tareas duplicadas · SAST: análisis estático de seguridad del código (CodeQL) · SHA-256: huella que demuestra que un archivo no cambió · CSPM: postura de seguridad cloud en Defender · KQL: consultas de telemetría en Application Insights. Los hallazgos SecOps de severidad alta se muestran aparte: REN-001 certifica una sola regla.</p>
           </div>
           <div class="help-col">
             <h3>Alcances de hallazgos SecOps</h3>
@@ -225,6 +226,7 @@
       <p class="ledger-headline" id="ledger-headline">Sin corridas todavía: pulsa «Ejecutar evaluación» para llenar la matriz.</p>
       <p class="filter-note" id="ledger-filter-note" hidden></p>
 
+      <div class="ledger-pin" id="ledger-pin" aria-hidden="true" hidden></div>
       <div class="ledger-frame">
         <table class="ledger" id="ledger" role="table" data-running="false" aria-labelledby="results-title" aria-describedby="ledger-headline">
           <thead id="ledger-head" role="rowgroup"></thead>
@@ -247,6 +249,7 @@
           <tfoot id="ledger-foot" role="rowgroup"></tfoot>
         </table>
       </div>
+      <ul class="ledger-key" id="ledger-key" aria-label="Clave de estados de etapa"></ul>
 
         <section id="stage-inspector" class="stage-inspector" data-docked="true" hidden aria-labelledby="stage-inspector-title" tabindex="-1">
           <div class="inspector-topbar">

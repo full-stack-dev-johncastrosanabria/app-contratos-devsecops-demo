@@ -474,7 +474,8 @@ def build_eight_stages(report: dict, devsecops_data: dict) -> list[dict]:
             "estado": "verificado" if not dfd.get("hallazgos") else "atencion",
             "resumen": (
                 f"HTTPS exclusivo: {'sí' if dfd.get('https_exclusivo_verificado') else 'pausado'} · "
-                f"{len(dfd.get('hallazgos') or [])} observación(es) de postura"
+                f"{len(dfd.get('hallazgos') or [])} "
+                f"{'observación' if len(dfd.get('hallazgos') or []) == 1 else 'observaciones'} de postura"
             ),
             "descripcion": "Evalúa controles Foundational CSPM en Azure Resource Graph y endurecimiento TLS / identidad administrada del recurso.",
             "datos": {
