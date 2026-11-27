@@ -665,5 +665,34 @@ class DevSecOpsRegression(unittest.TestCase):
                 self.assertEqual((vuln_repo / rel).read_bytes(), raw_bytes)
 
 
+class BoardsPapelera(unittest.TestCase):
+    def test_reset_boards_papelera_y_fallback(self):
+        import urllib.error
+        from assessment.demo_reset import reset_boards_demo_state
+
+        calls = []
+
+        def api(method, url, headers, body=None, timeout=15):
+            calls.append((method, url, body))
+            if "/wiql" in url:
+                return {"workItems": [{"id": 11}, {"id": 12}]}
+            if method == "DELETE" and "/workitems/12" in url:
+                raise urllib.error.HTTPError(url, 403, "Forbidden", {}, None)
+            return {}
+
+        settings = {"AZURE_DEVOPS_ORG_URL": "https://dev.azure.com/o", "AZURE_DEVOPS_PROJECT": "P", "AZURE_DEVOPS_WORK_ITEM_ID": "1"}
+        with patch("assessment.demo_reset._ado_headers", return_value={"Authorization": "x"}), \
+             patch("assessment.demo_reset._http_json", side_effect=api):
+            res = reset_boards_demo_state(settings)
+
+        self.assertEqual(res["metodo_por_tarea"], {"AB#11": "papelera", "AB#12": "removed"})
+        self.assertEqual(res["tareas_retiradas"], ["AB#11", "AB#12"])
+        self.assertTrue(any(m == "DELETE" and "/workitems/11?" in u for m, u, _ in calls))
+        self.assertFalse(any(m == "PATCH" and "/workitems/11?" in u for m, u, _ in calls))
+        removed_patch = [b for m, u, b in calls if m == "PATCH" and "/workitems/12?" in u]
+        self.assertEqual(len(removed_patch), 1)
+        self.assertIn({"op": "add", "path": "/fields/System.State", "value": "Removed"}, removed_patch[0])
+
+
 if __name__ == "__main__":
     unittest.main()

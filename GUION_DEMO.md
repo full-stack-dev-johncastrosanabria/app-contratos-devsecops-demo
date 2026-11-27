@@ -189,7 +189,7 @@ Todo lo que hagas durante una sesión (evaluaciones, contratos de prueba en `:50
 2. **Para dejar toda la sala limpia antes de la siguiente audiencia:** hacé clic arriba a la derecha en **«Reiniciar demo»**:
    - **Archivar corridas y reiniciar KPIs:** mueve las corridas actuales a `assessment/runs/_archivo_demos/<timestamp>/` (no se pierden).
    - **Limpiar contratos locales en `:5080`:** elimina los `datos.json` efímeros de `v1`, `v2` y `v3`.
-   - **Reiniciar tareas demo en Azure Boards** *(opcional)*: pasa las tareas `devsecops-fp-*` a estado `Removed` y restaura `AB#1` a su estado canónico.
+   - **Reiniciar tareas demo en Azure Boards** *(opcional)*: envía a la papelera de Boards las tareas `devsecops-fp-*` (se pueden restaurar; si el token no tiene permiso de borrado, quedan en `Removed`) y restaura `AB#1` a su estado canónico.
 3. **¿Querés recuperar la sesión anterior?** Abrí de nuevo **«Reiniciar demo»** y pulsá **«Restaurar última sesión archivada»**.
 
 ### Opción B — Desde Terminal (CLI)

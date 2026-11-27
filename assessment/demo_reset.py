@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import re
 import shutil
 from pathlib import Path
+import urllib.error
 import urllib.parse
 
 from .integrations import _ado_headers, _http_json, load_settings
@@ -136,21 +137,31 @@ def reset_boards_demo_state(settings: dict[str, str] | None = None) -> dict:
     found = _http_json("POST", f"{org}/{proj_enc}/_apis/wit/wiql?api-version=7.1", headers, wiql)
     items = found.get("workItems") or []
     removed_ids: list[int] = []
+    methods: dict[str, str] = {}
     for entry in items:
         tid = entry["id"]
-        _http_json(
-            "PATCH",
-            f"{org}/{proj_enc}/_apis/wit/workitems/{tid}?api-version=7.1",
-            patch_headers,
-            [
-                {"op": "add", "path": "/fields/System.State", "value": "Removed"},
-                {
-                    "op": "add",
-                    "path": "/fields/System.History",
-                    "value": "<p>Tarea retirada (<code>Removed</code>) al reiniciar el entorno para una nueva sesión de demostración.</p>",
-                },
-            ],
-        )
+        item_url = f"{org}/{proj_enc}/_apis/wit/workitems/{tid}?api-version=7.1"
+        try:
+            # Sin destroy: la tarea va a la papelera de Boards y se puede restaurar.
+            _http_json("DELETE", item_url, headers)
+            methods[f"AB#{tid}"] = "papelera"
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (401, 403):
+                raise
+            _http_json(
+                "PATCH",
+                item_url,
+                patch_headers,
+                [
+                    {"op": "add", "path": "/fields/System.State", "value": "Removed"},
+                    {
+                        "op": "add",
+                        "path": "/fields/System.History",
+                        "value": "<p>Tarea retirada (<code>Removed</code>) al reiniciar el entorno para una nueva sesión de demostración.</p>",
+                    },
+                ],
+            )
+            methods[f"AB#{tid}"] = "removed"
         removed_ids.append(tid)
 
     # Restaurar AB#1 a su estado canónico limpio
@@ -169,6 +180,7 @@ def reset_boards_demo_state(settings: dict[str, str] | None = None) -> dict:
         "historia_restaurada": f"AB#{wi_id}",
         "tareas_retiradas": [f"AB#{tid}" for tid in removed_ids],
         "cantidad_tareas_retiradas": len(removed_ids),
+        "metodo_por_tarea": methods,
     }
 
 
