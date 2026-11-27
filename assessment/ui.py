@@ -14,7 +14,7 @@ import time
 import urllib.request
 
 from .__main__ import ROOT, apply_closure, apply_decision, apply_reopen, assess_project
-from .analytics import build_powerbi_metrics, render_powerbi_csv
+from .analytics import analyze_observability_agent, build_powerbi_metrics, render_powerbi_csv
 from .demo_reset import execute_demo_reset, list_archived_sessions, restore_latest_archive
 from .integrations import fetch_sonarqube_context, load_settings
 from .powerbi_cloud import get_powerbi_state, sync_powerbi_cloud
@@ -28,12 +28,14 @@ from .remediation import (
 )
 from .vulnerabilities import (
     apply_vuln_remediation,
+    audit_post_mitigation_agent,
     close_vuln_github_prs,
     create_vuln_github_pr,
     generate_vuln_remediation,
     public_vuln_state,
     revert_vuln_remediation,
     scan_vulnerabilities,
+    triage_vulnerabilities,
 )
 from .workflow import DecisionAlreadyResolved
 
@@ -145,6 +147,7 @@ def _format_summary(report: dict) -> dict:
         "cobertura",
         "reporte_vulnerabilidades",
         "investigacion_secops",
+        "investigacion_gobernanza",
         "etapas_devsecops",
         "accion_propuesta",
         "cierre_ciclo_boards",
@@ -334,6 +337,12 @@ class DemoHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/powerbi/publicar":
             self._handle_powerbi_publish()
+            return
+        if self.path == "/api/observabilidad/analizar":
+            self._handle_observability_analyze()
+            return
+        if self.path == "/api/vulnerabilidades/triaje":
+            self._handle_vuln_triage()
             return
         if self.path == "/api/vulnerabilidades/remediar":
             self._handle_vuln_draft()
@@ -592,12 +601,43 @@ class DemoHandler(BaseHTTPRequestHandler):
                     continue
         return vulns_by_ver
 
+    def _handle_vuln_triage(self) -> None:
+        try:
+            payload = self._read_json_body(512)
+            version = payload.get("version", "v1")
+            use_ai = bool(payload.get("usar_ia", True))
+            if version not in ("v1", "v2", "v3"):
+                raise ValueError
+        except (ValueError, TypeError):
+            self.send_json(400, {"error": "Parámetros inválidos para el triaje agéntico de vulnerabilidades."})
+            return
+        try:
+            triage = asyncio.run(triage_vulnerabilities(ROOT, OUTPUT, version=version, use_ai=use_ai))
+        except Exception as exc:
+            self.send_json(500, {"error": f"No se pudo completar el triaje agéntico: {exc}"})
+            return
+        self.send_json(200, triage)
+
+    def _handle_observability_analyze(self) -> None:
+        try:
+            payload = self._read_json_body(512)
+            use_ai = bool(payload.get("usar_ia", True))
+        except (ValueError, TypeError):
+            self.send_json(400, {"error": "Parámetros inválidos para analizar observabilidad y Power BI."})
+            return
+        try:
+            briefing = asyncio.run(analyze_observability_agent(OUTPUT, use_ai=use_ai))
+        except Exception as exc:
+            self.send_json(500, {"error": f"No se pudo ejecutar el Agente Analista SRE/BI: {exc}"})
+            return
+        self.send_json(200, briefing)
+
     def _handle_vuln_draft(self) -> None:
         try:
             payload = self._read_json_body(512)
             vuln_id = str(payload["id"])
             version = payload.get("version", "v1")
-            use_ai = bool(payload.get("usar_ia", False))
+            use_ai = bool(payload.get("usar_ia", True))
             if vuln_id not in ("SEC-CI-001", "SEC-DOCKER-001", "SEC-K8S-001", "SEC-WEB-001") or version not in ("v1", "v2", "v3"):
                 raise ValueError
         except (ValueError, KeyError, TypeError):
@@ -616,6 +656,7 @@ class DemoHandler(BaseHTTPRequestHandler):
             vuln_id = str(payload["id"])
             version = payload.get("version", "v1")
             origen = str(payload.get("origen") or "agente_secops")[:40]
+            use_ai = bool(payload.get("usar_ia", False))
             if vuln_id not in ("SEC-CI-001", "SEC-DOCKER-001", "SEC-K8S-001", "SEC-WEB-001", "TODAS") or version not in ("v1", "v2", "v3"):
                 raise ValueError
         except (ValueError, KeyError, TypeError):
@@ -623,8 +664,18 @@ class DemoHandler(BaseHTTPRequestHandler):
             return
         try:
             with EVAL_LOCK:
+                before_scan = scan_vulnerabilities(ROOT, version=version, runs_dir=OUTPUT) if use_ai else None
                 res = apply_vuln_remediation(ROOT, OUTPUT, vuln_id, version=version, origen=origen)
                 vulns_by_ver = self._refresh_cached_stage3()
+                if use_ai and before_scan is not None:
+                    res["verificacion_agente"] = asyncio.run(
+                        audit_post_mitigation_agent(
+                            res.get("aplicados", []),
+                            before_scan,
+                            res["reporte_vulnerabilidades"],
+                            use_ai=True,
+                        )
+                    )
         except Exception as exc:
             self.send_json(500, {"error": f"No se pudo aplicar la mitigación SecOps: {exc}"})
             return
@@ -664,6 +715,7 @@ class DemoHandler(BaseHTTPRequestHandler):
             payload = self._read_json_body(512)
             vuln_id = str(payload["id"])
             version = payload.get("version", "v1")
+            use_ai = bool(payload.get("usar_ia", True))
             if vuln_id not in ("SEC-CI-001", "SEC-DOCKER-001", "SEC-K8S-001", "SEC-WEB-001") or version not in ("v1", "v2", "v3"):
                 raise ValueError
         except (ValueError, KeyError, TypeError):
@@ -671,7 +723,7 @@ class DemoHandler(BaseHTTPRequestHandler):
             return
         try:
             with EVAL_LOCK:
-                res = asyncio.run(create_vuln_github_pr(ROOT, OUTPUT, vuln_id, version=version))
+                res = asyncio.run(create_vuln_github_pr(ROOT, OUTPUT, vuln_id, version=version, use_ai=use_ai))
         except Exception as exc:
             self.send_json(500, {"error": f"No se pudo abrir el PR SecOps en GitHub: {exc}"})
             return

@@ -3571,6 +3571,33 @@ details[open] > summary .summary-chevron {
   }
 }
 
+.agent-triage-box {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.triage-priority-list {
+  margin: 0;
+  padding-inline-start: 1.25rem;
+  display: grid;
+  gap: 4px;
+  font-size: var(--text-sm);
+}
+
+.gov-agent-note {
+  padding: var(--space-2) var(--space-3);
+  border-inline-start: 3px solid var(--accent-primary);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+
 /* The matrix ends on the next human decision */
 
 /* The shared band sizes its grid to its rows, so a filtered set never leaves an orphan tile */

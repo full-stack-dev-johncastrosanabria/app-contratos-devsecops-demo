@@ -129,6 +129,10 @@ const ENUM_TEXT = {
   COMPLETADA: "Completada",
   SOLO_EVIDENCIA: "Solo evidencia",
   NO_SOLICITADA: "No solicitada",
+  GO_PRODUCCION: "Go a producción",
+  BLOQUEAR_REGRESION: "Bloquear regresión",
+  EXIGIR_EVIDENCIA_QA: "Exigir evidencia QA",
+  OBSERVAR_CON_MITIGACION: "Observar con mitigación SecOps",
 };
 
 function humanize(text) {
@@ -215,9 +219,15 @@ const TOOL_LABELS = {
   inspeccionar_prueba: "QA · Inspeccionó el código C# y la aserción de la prueba",
   obtener_historia_boards: "QA · Consultó historia y criterios en Azure Boards",
   consultar_cambio_github: "QA · Consultó Pull Request y pipeline en GitHub",
-  consultar_seguridad_origen: "SecOps · Consultó SonarQube, CodeQL y Dependabot",
-  consultar_despliegue_y_defender: "SecOps · Consultó Container App y Defender CSPM",
+  consultar_gobernanza_ci_y_copilot: "QA · Auditó reglas GitHub Copilot, Azure Pipelines y Cobertura XML",
+  consultar_seguridad_origen: "SecOps · Consultó CodeQL, Dependabot, Secret Scanning y SBOM",
+  consultar_calidad_sonarqube: "SecOps · Consultó Quality Gate, ratings e issues en SonarQube Cloud",
+  ejecutar_escaneo_trivy_e_iac: "SecOps · Ejecutó Aqua Trivy CLI (IaC, Dockerfile DS002 y CVEs)",
+  consultar_despliegue_y_defender: "SecOps · Consultó Container App, manifiestos AKS y Defender CSPM",
   consultar_telemetria_appinsights: "SecOps · Consultó métricas KQL en Application Insights",
+  consultar_brechas_criterios_y_despliegue: "Gobernanza · Cruzó matriz multi-criterio, vulnerabilidades y despliegue",
+  consultar_kpis_powerbi_y_telemetria: "Gobernanza · Consultó KPIs Power BI y línea base KQL",
+  consultar_backlog_e_integraciones_ia: "Gobernanza · Consultó historia AB#1 y plugin Security Copilot",
 };
 
 const FIELD_LABELS = {
@@ -1166,6 +1176,8 @@ function openStageInspector(stageNumber, focusVersion, origin = null, { refresh 
 
   if (baseMeta.numero === 3) {
     renderStage3VulnReport(stageInspectorBody, inspectedVersion);
+  } else if (baseMeta.numero === 7) {
+    renderStage7ObservabilityAgent(stageInspectorBody, inspectedVersion);
   } else if (baseMeta.numero === 8) {
     renderStage8SecOpsWorkbench(stageInspectorBody, inspectedVersion);
   }
@@ -2000,6 +2012,44 @@ function renderAgentInvestigation(card, report) {
       evidence.append(detail);
     }
   }
+
+  const govInv = report.investigacion_gobernanza;
+  if (govInv && govInv.estado && govInv.estado !== "NO_SOLICITADA") {
+    const detail = document.createElement("details");
+    const decisionHuman = ENUM_TEXT[govInv.decision_sugerida] || govInv.decision_sugerida || "Síntesis ejecutiva";
+    const summaryLabel = govInv.proveedor
+      ? `Agente SRE & Gobernanza (MAF) · ${decisionHuman}`
+      : `Síntesis de gobernanza · ${decisionHuman}`;
+    detail.append(createSummary(summaryLabel));
+    const content = element("div", null, "detail-content");
+    content.append(
+      element(
+        "p",
+        `Riesgo operativo estimado: ${govInv.riesgo_operativo || "N/D"} · Subordinado al dictamen determinista ${report.veredicto}.`,
+        "agent-scope-note"
+      )
+    );
+    if (govInv.dictamen_ejecutivo) content.append(element("p", govInv.dictamen_ejecutivo));
+    if (govInv.sintesis_observabilidad_bi) {
+      content.append(element("p", `Observabilidad y Power BI: ${govInv.sintesis_observabilidad_bi}`, "source-ref-line"));
+    }
+    if (Array.isArray(govInv.plan_accion_priorizado) && govInv.plan_accion_priorizado.length) {
+      const planList = element("ul", null, "tool-trace-list");
+      for (const step of govInv.plan_accion_priorizado) {
+        planList.append(element("li", `Prioridad: ${step}`));
+      }
+      content.append(planList);
+    }
+    if (Array.isArray(govInv.llamadas) && govInv.llamadas.length) {
+      const ul = element("ul", null, "tool-trace-list");
+      for (const call of govInv.llamadas) {
+        ul.append(element("li", `Herramienta invocada: ${TOOL_LABELS[call.herramienta] || call.herramienta}`));
+      }
+      content.append(ul);
+    }
+    detail.append(content);
+    evidence.append(detail);
+  }
 }
 
 function createReopenDecisionButton(card, version, runId) {
@@ -2122,6 +2172,15 @@ function renderGovernance(card, version, runId, action, focusResult = false, clo
   }
   panel.append(header);
   if (action.titulo) panel.append(element("p", action.titulo, "gov-title"));
+  if (action.recomendacion_agente) {
+    const agNote = element("div", null, "gov-agent-note");
+    const decText = ENUM_TEXT[action.decision_sugerida] || action.decision_sugerida || "Recomendación IA";
+    agNote.append(
+      element("strong", `Agente Gobernanza MAF (${decText} · Riesgo ${action.riesgo_operativo || "Alto"}): `),
+      element("span", action.recomendacion_agente)
+    );
+    panel.append(agNote);
+  }
 
   if (action.estado === "APROBADA" && action.boards_resultado) {
     const br = action.boards_resultado;
@@ -2375,6 +2434,10 @@ function renderStage3VulnReport(parent, version) {
   headBar.append(
     element("h4", `Reporte formal de vulnerabilidades · ${vscan.abiertas} abiertas · ${vscan.mitigadas}/${vscan.total} mitigadas`, "inspector-compare-title")
   );
+  const stage3BtnGroup = element("div", null, "rem-actions");
+  const triageBtn = element("button", "Triaje Agéntico (SonarQube + Trivy)", "btn-secondary");
+  triageBtn.type = "button";
+  stage3BtnGroup.append(triageBtn);
   if (vscan.abiertas > 0) {
     const jumpAllBtn = element("button", "Ir a Etapa 8 · Remediación con Agente SecOps →", "btn-primary");
     jumpAllBtn.type = "button";
@@ -2383,9 +2446,57 @@ function renderStage3VulnReport(parent, version) {
       if (firstOpen) selectedVulnForStage8 = firstOpen.id;
       openStageInspector(8, version);
     });
-    headBar.append(jumpAllBtn);
+    stage3BtnGroup.append(jumpAllBtn);
   }
+  headBar.append(stage3BtnGroup);
   section.append(headBar);
+
+  const triageBox = element("div", null, "agent-triage-box");
+  triageBox.hidden = true;
+  section.append(triageBox);
+
+  triageBtn.addEventListener("click", async () => {
+    if (!confirmPaidRun(triageBtn, 1, "agente")) return;
+    triageBtn.disabled = true;
+    setStatus(`Agente de Triaje AppSec correlacionando SonarQube Cloud, Aqua Trivy y OWASP en ${version}…`, "busy");
+    try {
+      const res = await fetch("/api/vulnerabilidades/triaje", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version, usar_ia: true }),
+      });
+      const trData = await readJson(res);
+      if (!res.ok) throw new Error(trData.error || "No se pudo ejecutar el triaje agéntico.");
+      triageBox.replaceChildren();
+      triageBox.append(
+        element(
+          "strong",
+          trData.origen === "agente_triaje_secops_ia"
+            ? `Agente de Triaje AppSec (MAF · ${trData.proveedor})`
+            : "Triaje determinista de respaldo"
+        ),
+        element("p", trData.resumen_ejecutivo),
+        element("p", `Cadena de exposición: ${trData.cadena_exposicion}`, "source-ref-line")
+      );
+      if (Array.isArray(trData.orden_prioridad) && trData.orden_prioridad.length) {
+        const ol = element("ol", null, "triage-priority-list");
+        for (const p of trData.orden_prioridad) ol.append(element("li", p));
+        triageBox.append(ol);
+      }
+      if (trData.accion_inmediata_recomendada) {
+        triageBox.append(element("p", `Acción recomendada: ${trData.accion_inmediata_recomendada}`, "rem-file"));
+      }
+      if (trData.traza_herramientas?.length) {
+        triageBox.append(element("p", `Herramientas invocadas: ${trData.traza_herramientas.join(" → ")}`, "rem-disclaimer"));
+      }
+      triageBox.hidden = false;
+      setStatus(`Triaje agéntico completado para ${version}.`, "pass");
+    } catch (err) {
+      setStatus(describeFetchError(err, "No se pudo completar el triaje agéntico."), "error");
+    } finally {
+      triageBtn.disabled = false;
+    }
+  });
 
   const wrapper = element("div", null, "table-wrapper vuln-table-wrap");
   wrapper.tabIndex = 0;
@@ -2503,6 +2614,79 @@ function renderStage3VulnReport(parent, version) {
   parent.append(section);
 }
 
+function renderStage7ObservabilityAgent(parent, version) {
+  const bench = element("div", null, "secops-workbench");
+  const headBar = element("div", null, "vuln-head-bar");
+  headBar.append(
+    element("h4", "Agente Analista SRE, Telemetría KQL y Power BI (MAF)", "inspector-compare-title")
+  );
+  const actions = element("div", null, "rem-actions");
+  const runSreBtn = element("button", "Analizar KQL y KPIs con Agente SRE/BI", "btn-primary");
+  runSreBtn.type = "button";
+  const syncPbiBtn = element("button", "Sincronizar y abrir en Power BI Web", "btn-secondary");
+  syncPbiBtn.type = "button";
+  syncPbiBtn.addEventListener("click", () => openPowerBiWebBtn?.click());
+  actions.append(runSreBtn, syncPbiBtn);
+  headBar.append(actions);
+  bench.append(headBar);
+
+  const outBox = element("div", null, "agent-triage-box");
+  const govPre = reportsByVersion.get(version)?.investigacion_gobernanza;
+  if (govPre?.sintesis_observabilidad_bi && govPre?.proveedor) {
+    outBox.append(
+      element("strong", `Síntesis activa del Agente SRE & Gobernanza (${govPre.proveedor})`),
+      element("p", govPre.sintesis_observabilidad_bi)
+    );
+  } else {
+    outBox.hidden = true;
+  }
+  bench.append(outBox);
+
+  runSreBtn.addEventListener("click", async () => {
+    if (!confirmPaidRun(runSreBtn, 1, "agente")) return;
+    runSreBtn.disabled = true;
+    setStatus("Agente Analista SRE/BI consultando KQL en Application Insights y KPIs de Power BI…", "busy");
+    try {
+      const res = await fetch("/api/observabilidad/analizar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ usar_ia: true }),
+      });
+      const bi = await readJson(res);
+      if (!res.ok) throw new Error(bi.error || "No se pudo ejecutar el Agente SRE/BI.");
+      outBox.replaceChildren();
+      outBox.append(
+        element(
+          "strong",
+          bi.origen === "agente_sre_bi_ia"
+            ? `Agente Analista SRE & Power BI (MAF · ${bi.proveedor}) — ${bi.titular_ejecutivo}`
+            : `Síntesis SRE/BI — ${bi.titular_ejecutivo}`
+        ),
+        element("p", bi.diagnostico_sre)
+      );
+      if (Array.isArray(bi.hallazgos_tendencia) && bi.hallazgos_tendencia.length) {
+        const ul = element("ul", null, "triage-priority-list");
+        for (const item of bi.hallazgos_tendencia) ul.append(element("li", item));
+        outBox.append(ul);
+      }
+      if (bi.recomendacion_comite) {
+        outBox.append(element("p", `Recomendación para comité: ${bi.recomendacion_comite}`, "rem-file"));
+      }
+      if (bi.traza_herramientas?.length) {
+        outBox.append(element("p", `Herramientas invocadas: ${bi.traza_herramientas.join(" → ")}`, "rem-disclaimer"));
+      }
+      outBox.hidden = false;
+      setStatus("Diagnóstico agéntico de observabilidad y Power BI completado.", "pass");
+    } catch (err) {
+      setStatus(describeFetchError(err, "No se pudo ejecutar el análisis SRE/BI."), "error");
+    } finally {
+      runSreBtn.disabled = false;
+    }
+  });
+
+  parent.append(bench);
+}
+
 function renderStage8SecOpsWorkbench(parent, version) {
   const vscan = vulnerabilitiesByVersion[version] || reportsByVersion.get(version)?.reporte_vulnerabilidades;
   if (!vscan || !Array.isArray(vscan.hallazgos)) return;
@@ -2544,28 +2728,31 @@ function renderStage8SecOpsWorkbench(parent, version) {
   detDraftBtn.type = "button";
   quickButtons.append(agentDraftBtn, detDraftBtn);
 
+  let lastSecOpsAudit = null;
+
   if (vscan.abiertas > 1) {
-    const fixAllBtn = element("button", `Mitigar las ${vscan.abiertas} abiertas en lote`, "btn-ghost");
+    const fixAllBtn = element("button", `Mitigar las ${vscan.abiertas} abiertas con Agente SecOps`, "btn-ghost");
     fixAllBtn.type = "button";
     fixAllBtn.addEventListener("click", async () => {
       if (fixAllBtn.dataset.armed !== "true") {
-        arm(fixAllBtn, "Confirmar mitigación en lote + reauditoría");
+        arm(fixAllBtn, "Confirmar mitigación agéntica + verificación Trivy");
         return;
       }
       disarm(fixAllBtn);
       fixAllBtn.disabled = true;
-      setStatus("Aplicando endurecimiento SecOps en lote y reauditando Etapa 3…", "busy");
+      setStatus("Aplicando endurecimiento en lote y verificando reducción de riesgo con Agente SecOps + Aqua Trivy…", "busy");
       try {
         const res = await fetch("/api/vulnerabilidades/aplicar", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: "TODAS", version, origen: "lote_secops" }),
+          body: JSON.stringify({ id: "TODAS", version, origen: "lote_agente_secops", usar_ia: true }),
         });
         const data = await readJson(res);
         if (!res.ok) throw new Error(data.error || "No se pudo aplicar la mitigación en lote.");
         syncVulnPayload(data, version);
         openStageInspector(8, version, null, { refresh: true });
-        setStatus("Las 4 vulnerabilidades fueron mitigadas y la Etapa 3 quedó en estado Verificado.", "pass");
+        const auditMsg = data.verificacion_agente?.reduccion_riesgo_verificada || "Etapa 3 en estado Verificado.";
+        setStatus(`Las 4 vulnerabilidades fueron mitigadas y auditadas por el Agente SecOps (${auditMsg})`, "pass");
       } catch (err) {
         fixAllBtn.disabled = false;
         setStatus(describeFetchError(err, "No se pudo completar la mitigación en lote."), "error");
@@ -2743,15 +2930,18 @@ function renderStage8SecOpsWorkbench(parent, version) {
           const r2 = await fetch("/api/vulnerabilidades/aplicar", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: chosenId, version, origen: draft.origen }),
+            body: JSON.stringify({ id: chosenId, version, origen: draft.origen, usar_ia: useAi }),
           });
           const d2 = await readJson(r2);
           if (!r2.ok) throw new Error(d2.error || "No se pudo aplicar la mitigación.");
           syncVulnPayload(d2, version);
           openStageInspector(8, version, null, { refresh: true });
           const leftOpen = d2.reporte_vulnerabilidades?.abiertas ?? 0;
+          const verifNote = d2.verificacion_agente?.reduccion_riesgo_verificada
+            ? ` · ${d2.verificacion_agente.reduccion_riesgo_verificada}`
+            : "";
           setStatus(
-            `${chosenId} mitigada y verificada en Etapa 3 (${leftOpen} vulnerabilidad(es) restantes).`,
+            `${chosenId} mitigada y auditada en Etapa 3 (${leftOpen} abiertas restantes${verifNote}).`,
             "pass"
           );
         } catch (err) {
@@ -2776,7 +2966,7 @@ function renderStage8SecOpsWorkbench(parent, version) {
           const r3 = await fetch("/api/vulnerabilidades/pr", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: chosenId, version }),
+            body: JSON.stringify({ id: chosenId, version, usar_ia: useAi }),
           });
           const d3 = await readJson(r3);
           if (!r3.ok) throw new Error(d3.error || "No se pudo abrir el PR SecOps.");
@@ -2920,16 +3110,16 @@ function renderRemediation(card, version, report) {
   }
 
   const actions = element("div", null, "rem-actions");
-  const detBtn = element("button", "Ver borrador · 0 tokens", "btn-secondary");
-  detBtn.type = "button";
-  const aiBtn = element("button", "Generar con Azure AI Foundry", "btn-ghost");
+  const aiBtn = element("button", "Diseñar y prevalidar con Agente C# (MAF)", "btn-primary");
   aiBtn.type = "button";
-  actions.append(detBtn, aiBtn);
+  const detBtn = element("button", "Plantilla de contingencia · 0 tokens", "btn-ghost");
+  detBtn.type = "button";
+  actions.append(aiBtn, detBtn);
 
   const outBox = element("div", null, "rem-output");
   outBox.hidden = true;
   let latestSnippet = null;
-  let latestUsedAi = false;
+  let latestUsedAi = true;
 
   const buildExecutionBar = () => {
     const execBar = element("div", null, "rem-exec-bar");
@@ -3037,12 +3227,17 @@ function renderRemediation(card, version, report) {
       latestUsedAi = useAi;
       outBox.replaceChildren();
       const sourceLabel = draft.origen === "agente_ia"
-        ? `Generado por IA (${draft.proveedor || "Foundry"})`
-        : "Plantilla determinista verificada (0 tokens)";
+        ? `Agente Ingeniero C# (MAF · ${draft.proveedor || "Foundry"})`
+        : "Plantilla determinista de contingencia (0 tokens)";
       outBox.append(
         element("p", `${sourceLabel} · Archivo objetivo: ${draft.archivo_objetivo}`, "rem-file"),
         element("p", draft.explicacion, "source-ref-line")
       );
+      if (draft.traza_herramientas?.length) {
+        outBox.append(
+          element("p", `Herramientas invocadas y autovalidación: ${draft.traza_herramientas.join(" → ")}`, "rem-disclaimer")
+        );
+      }
       if (draft.nota_ia) outBox.append(element("p", draft.nota_ia, "rem-disclaimer"));
 
       const codeId = `rem-snippet-${version}`;
@@ -3164,8 +3359,8 @@ form.elements.modo.addEventListener("change", () => {
     btn.textContent = evalLabel(btn.dataset.eval);
   }
   document.querySelector("#mode-help").textContent = form.elements.modo.value === "agente"
-    ? "Ejecuta en paralelo los agentes de QA y Seguridad/Operación sobre Azure AI Foundry; el dictamen lo decide siempre la política determinista."
-    : "Evalúa la evidencia local y cloud aplicando únicamente la política determinista sin consumir tokens de IA.";
+    ? "Orquesta en paralelo 3 agentes sobre Microsoft Agent Framework y Azure AI Foundry (QA, SecOps SonarQube/Trivy y SRE/Gobernanza), con validación determinista de cada hallazgo y parche."
+    : "Contingencia offline: evalúa la evidencia local y cloud aplicando únicamente la política determinista sin consumir tokens de IA.";
 });
 
 filterDiffBtn.addEventListener("click", () => {
@@ -3234,7 +3429,7 @@ async function executeAssessment(selectedVersions, mode, options = {}) {
       markRunningVersion(version, index, selectedVersions.length);
       setStatus(`Evaluando ${version} (${index + 1} de ${selectedVersions.length}) · ${mode === "agente" ? "Agentes MAF" : "Solo evidencia"}…`, "busy");
       const runningReason = mode === "agente"
-        ? "Ejecutando pruebas xUnit y consultando en paralelo a los agentes de QA y SecOps…"
+        ? "Ejecutando pruebas xUnit y orquestando en paralelo los 3 agentes MAF (QA, SecOps SonarQube/Trivy y SRE/Gobernanza)…"
         : "Ejecutando pruebas xUnit y verificando integridad de fuentes con SHA-256…";
       if (card.dataset.stale === "true") holdCard(card, "busy", "Evaluando", runningReason, "Ejecutando ahora…");
       else resetCardBands(card, "busy", "Evaluando", runningReason, "Ejecutando ahora…", false);
@@ -3494,11 +3689,8 @@ async function initEcosystem() {
     const autoVer = params.get("autoevaluar");
     if (Object.keys(cachedLatest).length > 0) {
       loadLatestBtn.hidden = false;
-      if (!versions.includes(autoVer)) {
-        form.elements.modo.value = "solo-evidencia";
-        form.elements.modo.dispatchEvent(new Event("change"));
-        document.querySelector("#mode-help").textContent = "Elegido porque ya hay corridas guardadas: revisarlas no consume tokens. Cambia a «Agentes MAF» para auditar con IA.";
-      }
+      form.elements.modo.value = "agente";
+      form.elements.modo.dispatchEvent(new Event("change"));
     }
 
     if (versions.includes(autoVer)) {

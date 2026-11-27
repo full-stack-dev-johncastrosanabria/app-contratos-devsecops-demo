@@ -16,7 +16,7 @@ import httpx2
 from anthropic import AsyncAnthropic
 from openai import AsyncAzureOpenAI
 
-from assessment.analytics import build_powerbi_metrics, render_powerbi_csv
+from assessment.analytics import analyze_observability_agent, build_powerbi_metrics, render_powerbi_csv
 from assessment.ci import matches_expected
 from assessment.demo_reset import execute_demo_reset, restore_latest_archive
 from assessment.evidence import APP, CRITERION, PROJECT, collect, read_cobertura
@@ -25,9 +25,11 @@ from assessment.policy import evaluate, evaluate_criteria_matrix, source_tests
 from assessment.powerbi_cloud import _build_executive_pbix, sync_powerbi_cloud
 from assessment.vulnerabilities import (
     apply_vuln_remediation,
+    audit_post_mitigation_agent,
     generate_vuln_remediation,
     revert_vuln_remediation,
     scan_vulnerabilities,
+    triage_vulnerabilities,
 )
 from assessment.remediation import (
     apply_local_remediation,
@@ -283,6 +285,8 @@ class DotnetIntegration(unittest.TestCase):
             self.assertEqual(report["etapas_devsecops"][4]["bloque"], "CloudOps")
             self.assertEqual(report["investigacion_secops"]["estado"], "SOLO_EVIDENCIA")
             self.assertEqual(report["investigacion_secops"]["hallazgos"][0]["alcance"], "recurso")
+            self.assertEqual(report["investigacion_gobernanza"]["estado"], "SOLO_EVIDENCIA")
+            self.assertEqual(report["investigacion_gobernanza"]["decision_sugerida"], "BLOQUEAR_REGRESION")
             self.assertEqual(report["accion_propuesta"]["estado"], "PENDIENTE_APROBACION")
             self.assertTrue((local_ev.directory / "checkpoint_aprobacion.json").is_file())
 
@@ -637,11 +641,23 @@ class DevSecOpsRegression(unittest.TestCase):
             draft_sec = asyncio.run(generate_vuln_remediation(vuln_repo, runs_dir, "SEC-DOCKER-001", version="v1", use_ai=False))
             self.assertIn("USER $APP_UID", draft_sec["codigo_sugerido"])
 
+            with patch("assessment.vulnerabilities.fetch_sonarqube_context", return_value={"disponible": True, "quality_gate": "FALLIDO"}):
+                triage_res = asyncio.run(triage_vulnerabilities(vuln_repo, runs_dir, version="v1", use_ai=False))
+                self.assertTrue(triage_res["disponible"])
+                self.assertGreaterEqual(len(triage_res["orden_prioridad"]), 4)
+
+            with patch("assessment.integrations.fetch_azure_runtime", return_value={"disponible": True, "telemetria": {"disponible": True, "total_solicitudes": 10, "fallos_5xx": 0, "tasa_error_pct": 0.0, "latencia_promedio_ms": 12.0}}):
+                bi_brief = asyncio.run(analyze_observability_agent(runs_dir, use_ai=False))
+                self.assertTrue(bi_brief["disponible"])
+                self.assertIn("corridas auditadas", bi_brief["titular_ejecutivo"])
+
             mitigated = apply_vuln_remediation(vuln_repo, runs_dir, "TODAS", version="v1")
             self.assertEqual(mitigated["reporte_vulnerabilidades"]["abiertas"], 0)
             self.assertEqual(mitigated["reporte_vulnerabilidades"]["mitigadas"], 4)
             if mitigated["reporte_vulnerabilidades"]["trivy"]["disponible"]:
                 self.assertEqual(mitigated["reporte_vulnerabilidades"]["trivy"]["misconfiguraciones_altas"], 0)
+            post_audit = asyncio.run(audit_post_mitigation_agent(mitigated["aplicados"], initial_scan, mitigated["reporte_vulnerabilidades"], use_ai=False))
+            self.assertIn("4 a 0", post_audit["dictamen_post_mitigacion"])
 
             rev_sec = revert_vuln_remediation(vuln_repo, runs_dir, vuln_id="TODAS", version="v1")
             self.assertEqual(rev_sec["reporte_vulnerabilidades"]["abiertas"], 4)

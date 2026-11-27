@@ -94,6 +94,17 @@ def markdown(report: dict) -> str:
             lines.append(f"- **[{item['alcance']} · {item['severidad']}]** {item['titulo']}: {item['evidencia']}")
         lines.extend(f"- `{call['herramienta']}`" for call in secops.get("llamadas") or [])
 
+    gov_inv = report.get("investigacion_gobernanza") or {}
+    if gov_inv.get("estado") not in (None, "NO_SOLICITADA"):
+        lines += ["", "## Gobernanza de Release y Observabilidad (Agente MAF)", "", f"Estado `{gov_inv['estado']}` · Decisión sugerida `{gov_inv.get('decision_sugerida', '-')}`.", ""]
+        if gov_inv.get("dictamen_ejecutivo"):
+            lines.append(gov_inv["dictamen_ejecutivo"])
+        if gov_inv.get("sintesis_observabilidad_bi"):
+            lines.append(f"- **Observabilidad / BI:** {gov_inv['sintesis_observabilidad_bi']}")
+        for step in gov_inv.get("plan_accion_priorizado") or []:
+            lines.append(f"- {step}")
+        lines.extend(f"- `{call['herramienta']}`" for call in gov_inv.get("llamadas") or [])
+
     action = report.get("accion_propuesta")
     if action:
         lines += ["", "## Acción de Gobernanza (Azure Boards)", ""]
@@ -163,6 +174,8 @@ async def assess(roots: list[Path], output: Path, agent: bool, devsecops: bool |
             print(f"  QA → {call['herramienta']}")
         for call in secops.get("llamadas") or []:
             print(f"  SecOps → {call['herramienta']}")
+        for call in (report.get("investigacion_gobernanza") or {}).get("llamadas") or []:
+            print(f"  Gobernanza → {call['herramienta']}")
         if report.get("accion_propuesta"):
             act = report["accion_propuesta"]
             print(f"  Acción ({act['estado']}) → {act['tag_idempotencia']}")

@@ -1,9 +1,22 @@
-"""Analítica longitudinal e integración tabular para Power BI y Microsoft Fabric."""
+"""Analítica longitudinal, agente SRE/BI e integración tabular para Power BI y Microsoft Fabric."""
+import asyncio
 import csv
 from datetime import datetime, timezone
 import io
 import json
 from pathlib import Path
+
+from agent_framework import tool
+from pydantic import BaseModel, ConfigDict
+
+
+class ObservabilityBriefing(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    titular_ejecutivo: str
+    diagnostico_sre: str
+    hallazgos_tendencia: list[str]
+    recomendacion_comite: str
 
 
 CSV_COLUMNS = (
@@ -186,3 +199,100 @@ def render_powerbi_csv(runs_dir: Path) -> str:
     for row in payload["corridas"]:
         writer.writerow(row)
     return buf.getvalue()
+
+
+async def analyze_observability_agent(runs_dir: Path, *, use_ai: bool = True) -> dict:
+    from .integrations import fetch_azure_runtime, load_settings
+    from .powerbi_cloud import get_powerbi_state
+    from .workflow import _build_model_client, _resolve_provider_config
+
+    metrics = build_powerbi_metrics(runs_dir)
+    kpis = metrics["kpis"]
+    pbi_state = get_powerbi_state(runs_dir)
+    az_runtime = await asyncio.to_thread(fetch_azure_runtime, load_settings())
+    tel = (az_runtime.get("telemetria") if isinstance(az_runtime, dict) else None) or {"disponible": False}
+
+    fallback = {
+        "disponible": True,
+        "origen": "reglas_deterministas",
+        "proveedor": None,
+        "traza_herramientas": [],
+        "titular_ejecutivo": (
+            f"{kpis['corridas_totales']} corridas auditadas · {kpis['controles_con_evidencia_pct']}% con evidencia trazable"
+        ),
+        "diagnostico_sre": (
+            f"Telemetría KQL en 24h: {tel.get('total_solicitudes', 0)} solicitudes, "
+            f"{tel.get('fallos_5xx', 0)} errores 5xx ({tel.get('tasa_error_pct', 0.0)}%) y "
+            f"latencia media de {tel.get('latencia_promedio_ms', 0.0)} ms."
+        ),
+        "hallazgos_tendencia": [
+            f"Criterios vigentes certificados: {kpis['criterios_vigentes_verificados']}/{kpis['criterios_vigentes_totales']} ({kpis['criterios_vigentes_pct']}%).",
+            f"Entregas bloqueadas por regresión funcional: {kpis['corridas_incumplidas']}; brechas silenciosas detectadas: {kpis['corridas_evidencia_insuficiente']}.",
+        ],
+        "recomendacion_comite": "Sincronizar dataset en Power BI Web antes del comité de release y exigir cierre de brechas en v2/v3.",
+    }
+    if not use_ai:
+        return fallback
+
+    provider, config, err = _resolve_provider_config()
+    if err or not provider:
+        fallback["nota_ia"] = err or "Proveedor IA no configurado; síntesis determinista activa."
+        return fallback
+
+    tool_trace: list[str] = []
+
+    @tool
+    def consultar_telemetria_kql_azure() -> dict:
+        """Consulta solicitudes HTTP, tasa de error 5xx, latencia y comparación contra línea base en Application Insights."""
+        tool_trace.append("consultar_telemetria_kql_azure")
+        return tel
+
+    @tool
+    def consultar_historial_kpis_powerbi() -> dict:
+        """Consulta KPIs longitudinales de corridas, criterios certificados, regresiones y brechas silenciosas."""
+        tool_trace.append("consultar_historial_kpis_powerbi")
+        return {"kpis": kpis, "ultimas_por_entrega": metrics.get("ultimas_por_entrega", {})}
+
+    @tool
+    def consultar_estado_dataset_powerbi_web() -> dict:
+        """Consulta el estado de sincronización del dataset Push y reporte visual en app.powerbi.com."""
+        tool_trace.append("consultar_estado_dataset_powerbi_web")
+        return pbi_state
+
+    try:
+        async with asyncio.timeout(55):
+            model_client = _build_model_client(provider, config)
+            async with model_client as client:
+                agent = client.as_agent(
+                    name="Agente Analista SRE y Power BI (Etapa 7)",
+                    instructions=(
+                        "Sos el Agente Analista de Observabilidad SRE e Inteligencia Ejecutiva (Etapa 7). "
+                        "Invocá primero consultar_telemetria_kql_azure, consultar_historial_kpis_powerbi y "
+                        "consultar_estado_dataset_powerbi_web sin emitir texto previo. "
+                        "Redactá en español ejecutivo el diagnóstico de estabilidad en producción, las tendencias de calidad "
+                        "entre v1/v2/v3 y la recomendación concreta para el comité de release."
+                    ),
+                    tools=[
+                        consultar_telemetria_kql_azure,
+                        consultar_historial_kpis_powerbi,
+                        consultar_estado_dataset_powerbi_web,
+                    ],
+                )
+                resp = await agent.run(
+                    "Analizá la telemetría KQL en vivo y los KPIs longitudinales de Power BI de esta sesión.",
+                    options={"response_format": ObservabilityBriefing},
+                )
+                structured = resp.value
+                if not isinstance(structured, ObservabilityBriefing):
+                    raise ValueError("Respuesta estructurada SRE/BI ausente")
+                dumped = structured.model_dump()
+                return {
+                    "disponible": True,
+                    "origen": "agente_sre_bi_ia",
+                    "proveedor": provider,
+                    "traza_herramientas": tool_trace,
+                    **dumped,
+                }
+    except Exception as exc:
+        fallback["nota_ia"] = f"Se usó síntesis determinista tras error del modelo ({type(exc).__name__})."
+        return fallback

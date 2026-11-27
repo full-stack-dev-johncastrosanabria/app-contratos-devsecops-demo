@@ -83,12 +83,16 @@ class DemoHTTP(unittest.TestCase):
                         self.assertIn("app.powerbi.com", json.loads(body_pbi)["powerbi"]["report_url"])
 
                     with (patch("assessment.ui.fetch_sonarqube_context", return_value={"disponible": True, "quality_gate": "FALLIDO", "vulnerabilidades": 10}),
+                          patch("assessment.ui.triage_vulnerabilities", return_value={"disponible": True, "origen": "agente_triaje_secops_ia", "orden_prioridad": ["SEC-CI-001"]}),
+                          patch("assessment.ui.analyze_observability_agent", return_value={"disponible": True, "origen": "agente_sre_bi_ia", "titular_ejecutivo": "OK"}),
                           patch("assessment.ui.generate_vuln_remediation", return_value={"disponible": True, "id": "SEC-DOCKER-001", "codigo_sugerido": "USER $APP_UID"}),
                           patch("assessment.ui.apply_vuln_remediation", return_value={"aplicados": ["Dockerfile"], "reporte_vulnerabilidades": {"abiertas": 3, "mitigadas": 1, "total": 4}}),
                           patch("assessment.ui.revert_vuln_remediation", return_value={"archivos_revertidos": ["Dockerfile"], "reporte_vulnerabilidades": {"abiertas": 4, "mitigadas": 0, "total": 4}})):
                         st_vuln, body_vuln = request("GET", "/api/vulnerabilidades")
                         self.assertEqual(st_vuln, 200)
                         self.assertEqual(json.loads(body_vuln)["sonarqube"]["quality_gate"], "FALLIDO")
+                        self.assertEqual(request("POST", "/api/vulnerabilidades/triaje", '{"version":"v1","usar_ia":true}', origin)[0], 200)
+                        self.assertEqual(request("POST", "/api/observabilidad/analizar", '{"usar_ia":true}', origin)[0], 200)
                         self.assertEqual(request("POST", "/api/vulnerabilidades/remediar", '{"id":"SEC-DOCKER-001","version":"v1"}', origin)[0], 200)
                         self.assertEqual(request("POST", "/api/vulnerabilidades/aplicar", '{"id":"SEC-DOCKER-001","version":"v1"}', origin)[0], 200)
                         self.assertEqual(request("POST", "/api/vulnerabilidades/revertir", '{"id":"SEC-DOCKER-001","version":"v1"}', origin)[0], 200)

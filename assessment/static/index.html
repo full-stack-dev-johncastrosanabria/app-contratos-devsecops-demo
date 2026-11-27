@@ -28,7 +28,7 @@
         </span>
         <div class="brand-copy">
           <span class="brand-name">NextGen DevSecOps Assessment</span>
-          <span class="brand-sub">Certificación determinista y gobernanza continua · REN-001.v2</span>
+          <span class="brand-sub">Orquestación Multi-Agente MAF + Política determinista · REN-001.v2</span>
         </div>
       </div>
 
@@ -125,7 +125,7 @@
           <h1 id="title">Evaluador de renovaciones</h1>
           <p class="deck-verdict" id="deck-verdict" aria-hidden="true" hidden></p>
           <p class="deck-rule">
-            <strong>Regla auditada (<code>REN-001</code>):</strong> al evaluar renovaciones, un contrato cancelado nunca debe generar un aviso. Los agentes QA y SecOps investigan las 8 etapas en paralelo; la política determinista <code>REN-001.v2</code> valida cada evidencia contra código y TRX antes de emitir el dictamen.
+            <strong>Regla auditada (<code>REN-001</code>):</strong> al evaluar renovaciones, un contrato cancelado nunca debe generar un aviso. Tres agentes especializados en Microsoft Agent Framework (<strong>QA</strong>, <strong>SecOps · SonarQube/Trivy</strong> y <strong>SRE &amp; Gobernanza</strong>) investigan, triajan y proponen remediaciones en paralelo; la política determinista <code>REN-001.v2</code> valida cada evidencia antes de emitir el dictamen.
           </p>
         </div>
         <div class="deck-utility">
@@ -234,8 +234,8 @@
           <div class="field-group">
             <label for="mode-select">Motor de análisis</label>
             <select id="mode-select" name="modo" aria-describedby="mode-help">
-              <option value="agente">Agentes MAF · QA y SecOps</option>
-              <option value="solo-evidencia">Solo evidencia · 0 tokens</option>
+              <option value="agente">Agentes MAF · QA, SecOps y Gobernanza (3 en paralelo)</option>
+              <option value="solo-evidencia">Contingencia sin IA · Solo evidencia (0 tokens)</option>
             </select>
           </div>
 
@@ -250,7 +250,7 @@
             <button type="button" class="btn-secondary" id="load-latest" hidden title="Vuelve a mostrar las últimas corridas guardadas sin consumir tokens">Restaurar caché</button>
           </div>
         </div>
-        <p id="mode-help" class="mode-caption">Ejecuta en paralelo los agentes de QA y Seguridad/Operación sobre Azure AI Foundry; el dictamen lo decide siempre la política determinista.</p>
+        <p id="mode-help" class="mode-caption">Orquesta en paralelo 3 agentes sobre Microsoft Agent Framework y Azure AI Foundry (QA, SecOps SonarQube/Trivy y SRE/Gobernanza), con validación determinista de cada hallazgo y parche.</p>
       </form>
 
       <div class="results-toolbar">
