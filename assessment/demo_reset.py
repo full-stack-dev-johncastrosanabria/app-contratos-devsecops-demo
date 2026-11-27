@@ -113,6 +113,18 @@ def restore_latest_archive(runs_dir: Path, session_name: str | None = None) -> d
     }
 
 
+def wiql_tareas_demo(project: str) -> dict:
+    """Tareas de demo que siguen vivas en Boards: las que el reinicio envía a la papelera."""
+    return {
+        "query": (
+            f"SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = '{project}' "
+            "AND [System.WorkItemType] = 'Task' "
+            "AND ([System.Tags] CONTAINS 'DevSecOps-Agent' OR [System.Tags] CONTAINS 'devsecops-fp-') "
+            "AND [System.State] <> 'Removed'"
+        )
+    }
+
+
 def reset_boards_demo_state(settings: dict[str, str] | None = None) -> dict:
     cfg = settings or load_settings()
     org = cfg.get("AZURE_DEVOPS_ORG_URL", "").rstrip("/")
@@ -126,15 +138,7 @@ def reset_boards_demo_state(settings: dict[str, str] | None = None) -> dict:
         return {"disponible": False, "motivo": "Sin credenciales activas para reiniciar Azure Boards."}
 
     proj_enc = urllib.parse.quote(project)
-    wiql = {
-        "query": (
-            f"SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = '{project}' "
-            "AND [System.WorkItemType] = 'Task' "
-            "AND ([System.Tags] CONTAINS 'DevSecOps-Agent' OR [System.Tags] CONTAINS 'devsecops-fp-') "
-            "AND [System.State] <> 'Removed'"
-        )
-    }
-    found = _http_json("POST", f"{org}/{proj_enc}/_apis/wit/wiql?api-version=7.1", headers, wiql)
+    found = _http_json("POST", f"{org}/{proj_enc}/_apis/wit/wiql?api-version=7.1", headers, wiql_tareas_demo(project))
     items = found.get("workItems") or []
     removed_ids: list[int] = []
     methods: dict[str, str] = {}

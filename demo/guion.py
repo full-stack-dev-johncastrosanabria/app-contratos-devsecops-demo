@@ -11,6 +11,7 @@ TIPOS: dict[str, tuple[str, ...]] = {
     "escribir": ("selector", "texto"),
     "esperar": ("condicion", "max_s", "espera_s"),
 }
+MOTORES = ("agente", "solo-evidencia")
 VENTANA_S = (480, 720)
 LIMITE_S = 690
 CARACTERES_POR_S = 17  # ritmo medido de Dalia a 1×
@@ -42,6 +43,8 @@ def validar(guion: dict) -> list[str]:
             for campo in TIPOS[tipo]:
                 if paso.get(campo) in (None, "", []):
                     errores.append(f"{donde}: «{tipo}» necesita «{campo}».")
+            if paso.get("motor") not in (None, *MOTORES):
+                errores.append(f"{donde}: «motor» debe ser agente o solo-evidencia.")
             if paso.get("opcional") and tipo != "narrar":
                 errores.append(f"{donde}: «opcional» solo vale en «narrar».")
             espera = paso.get("espera_s")
@@ -50,14 +53,22 @@ def validar(guion: dict) -> list[str]:
     return errores
 
 
-def _lista(valor) -> list[str]:
+def filtrar(guion: dict, motor: str) -> dict:
+    """El guion sin los pasos marcados para el otro motor; no modifica el original."""
+    return {**guion, "escenas": [
+        {**escena, "pasos": [p for p in escena.get("pasos") or [] if p.get("motor") in (None, motor)]}
+        for escena in guion.get("escenas") or []
+    ]}
+
+
+def lista(valor) -> list[str]:
     if not valor:
         return []
     return [valor] if isinstance(valor, str) else list(valor)
 
 
 def voces(paso: dict) -> list[str]:
-    return _lista(paso.get("voz")) + _lista(paso.get("voz_mientras")) + _lista(paso.get("relleno"))
+    return lista(paso.get("voz")) + lista(paso.get("voz_mientras")) + lista(paso.get("relleno"))
 
 
 def lineas(guion: dict) -> list[str]:
@@ -81,12 +92,12 @@ def proyectar(pasos: list[dict], duraciones: dict[str, float], velocidad: float,
         if tipo == "esperar":
             minimo, maximo = paso["espera_s"]
             espera = {"min": minimo, "max": maximo}.get(esperas, (minimo + maximo) / 2)
-            cubierta = sum(duraciones[t] for t in _lista(paso.get("voz_mientras")))
+            cubierta = sum(duraciones[t] for t in lista(paso.get("voz_mientras")))
             total += max(espera, cubierta / velocidad)
             continue
         if paso.get("opcional") and not opcionales:
             continue
-        narracion = sum(duraciones[t] for t in _lista(paso.get("voz")))
+        narracion = sum(duraciones[t] for t in lista(paso.get("voz")))
         accion = OVERHEAD[tipo] + (TECLEO_S * len(paso.get("texto", "")) if tipo == "escribir" else 0.0)
         total += (narracion + accion) / velocidad
     return total

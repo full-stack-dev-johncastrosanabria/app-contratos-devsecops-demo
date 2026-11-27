@@ -16,6 +16,7 @@
     pausado: false,
     pasoAPaso: false,
     accionando: false,
+    terminado: false,
     escenas: [],
     indice: -1,
     frontera: false,
@@ -68,7 +69,7 @@
   const pausa = (segundos) => temporizador(segundos).promesa;
 
   const esperasDePausa = [];
-  const sinPausa = () => (est.pausado ? new Promise((r) => esperasDePausa.push(r)) : Promise.resolve());
+  const sinPausa = () => (est.pausado && !est.terminado ? new Promise((r) => esperasDePausa.push(r)) : Promise.resolve());
 
   /* ---------- Estado público y eventos hacia Python ---------- */
   function estadoPublico() {
@@ -77,6 +78,7 @@
       velocidad: est.velocidad,
       pausado: est.pausado,
       pasoAPaso: est.pasoAPaso,
+      terminado: est.terminado,
       transcurrido_s: Math.round(reloj.transcurrido * 1000) / 1000,
     };
   }
@@ -146,8 +148,17 @@
       return;
     }
     armadoTerminar = -Infinity;
+    est.terminado = true;
     aviso("Terminando la demo y restaurando el entorno…");
     emitir("terminar");
+    // Python puede estar esperando un turno en pausa, una frontera o una línea: se libera todo.
+    esperasDePausa.splice(0).forEach((r) => r());
+    if (liberarFrontera) {
+      const liberar = liberarFrontera;
+      liberarFrontera = null;
+      liberar();
+    }
+    if (corte) corte.terminar();
     if (linea) linea.terminar();
   }
 
@@ -158,6 +169,7 @@
 
   function decir(texto, url, duracion) {
     montar();
+    if (est.terminado) return Promise.resolve();
     if (linea) linea.terminar();
     mostrarSubtitulo(String(texto ?? ""));
     const dur = Math.max(0, Number(duracion) || 0);
@@ -202,6 +214,7 @@
   }
 
   function esperar(ms) {
+    if (est.terminado) return Promise.resolve();
     const t = temporizador((Math.max(0, Number(ms) || 0)) / 1000);
     const propio = { terminar: t.cortar };
     corte = propio;
@@ -227,7 +240,7 @@
     // Que Espacio, N o Q del presentador no acaben escritos en la nota que el guion acaba de teclear.
     if (esEditable(enfocado)) enfocado.blur();
     await sinPausa();
-    if (!est.frontera) return;
+    if (est.terminado || !est.frontera) return;
     est.frontera = false;
     if (!est.pasoAPaso) return;
     await new Promise((r) => {
@@ -253,6 +266,7 @@
     est.velocidad = Number(velocidad) > 0 ? Number(velocidad) : 1;
     est.pasoAPaso = Boolean(pasoAPaso);
     est.pausado = false;
+    est.terminado = false;
     est.indice = -1;
     est.frontera = false;
     est.total = total_s;

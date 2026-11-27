@@ -73,6 +73,25 @@ class DirectorEnPagina(unittest.TestCase):
         self.assertFalse(page.evaluate("() => __director.estado().pausado"))
         self.assertEqual(page.input_value("#campo"), "a b")
 
+    def test_terminar_en_pausa_libera_turno(self):
+        page = self.abrir()
+        page.evaluate("() => { window.__eventos = []; window.__demoEvento = (e) => { window.__eventos.push(e.tipo); }; }")
+        page.evaluate("() => { __director.pausar(); window.__libre = false; __director.turno().then(() => { window.__libre = true; }); }")
+        page.wait_for_timeout(150)
+        self.assertFalse(page.evaluate("() => window.__libre"))
+        page.keyboard.press("q")
+        page.keyboard.press("q")
+        page.wait_for_function("() => window.__libre", timeout=2000)
+        self.assertIn("terminar", page.evaluate("() => window.__eventos"))
+
+    def test_tras_terminar_no_hay_mas_lineas(self):
+        page = self.abrir()
+        page.keyboard.press("q")
+        page.keyboard.press("q")
+        ms = page.evaluate("async () => { const t = performance.now(); await __director.decir('x', null, 5); await __director.esperar(5000); return performance.now() - t; }")
+        self.assertLess(ms, 300)
+        self.assertTrue(page.evaluate("() => __director.estado().terminado"))
+
     def test_layout_sin_solapes(self):
         for ancho, alto in ((1440, 900), (1920, 1080)):
             with self.subTest(viewport=f"{ancho}x{alto}"):
