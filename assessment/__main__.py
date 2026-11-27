@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .demo_reset import execute_demo_reset, restore_latest_archive
 from .integrations import load_settings
+from .powerbi_cloud import sync_powerbi_cloud
 from .remediation import (
     apply_local_remediation,
     close_github_remediation_prs,
@@ -196,6 +197,11 @@ def main() -> int:
 
     if args.proyecto == "restaurar-demo":
         res = restore_latest_archive(args.salida.resolve())
+        print(json.dumps(res, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.proyecto == "publicar-powerbi":
+        res = sync_powerbi_cloud(args.salida.resolve(), ensure_report=True)
         print(json.dumps(res, ensure_ascii=False, indent=2))
         return 0
 

@@ -59,11 +59,12 @@
           <span>GHAS · CodeQL · SBOM</span>
           <span class="sr-only"> (se abre en una nueva pestaña)</span>
         </a>
-        <a id="nav-powerbi" class="eco-pill" href="/api/metricas-powerbi.csv">
+        <a id="nav-powerbi" class="eco-pill" href="/api/metricas-powerbi.csv" target="_blank" rel="noopener">
           <svg viewBox="0 0 18 18" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
             <path d="M4 14.5v-5M9 14.5v-8M14 14.5v-11"></path>
           </svg>
-          <span>Power BI · CSV</span>
+          <span id="nav-powerbi-label">Power BI Web</span>
+          <span class="sr-only"> (se abre en una nueva pestaña)</span>
         </a>
         <a id="nav-copilot" class="eco-pill" href="/copilot/security-copilot-skill.yaml" target="_blank" rel="noopener">
           <svg viewBox="0 0 18 18" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
@@ -321,7 +322,13 @@
           <p class="section-sub">Indicadores históricos consolidados para Power BI, Microsoft Fabric y Microsoft Security Copilot.</p>
         </div>
         <div class="value-actions">
-          <a class="btn-secondary" href="/api/metricas-powerbi.csv">Descargar CSV Power BI</a>
+          <button type="button" class="btn-primary" id="open-powerbi-web-btn">
+            <svg viewBox="0 0 18 18" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+              <path d="M4 14.5v-5M9 14.5v-8M14 14.5v-11"></path>
+            </svg>
+            <span>Sincronizar y abrir en Power BI Web</span>
+          </button>
+          <a class="btn-secondary" href="/api/metricas-powerbi.csv">CSV local</a>
           <a class="btn-ghost" href="/api/metricas-powerbi.json" target="_blank" rel="noopener">JSON Fabric<span class="sr-only"> (se abre en una nueva pestaña)</span></a>
           <a class="btn-ghost" href="/copilot/openapi.yaml" target="_blank" rel="noopener">OpenAPI Security Copilot<span class="sr-only"> (se abre en una nueva pestaña)</span></a>
         </div>

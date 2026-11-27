@@ -17,6 +17,7 @@ from .__main__ import ROOT, apply_closure, apply_decision, apply_reopen, assess_
 from .analytics import build_powerbi_metrics, render_powerbi_csv
 from .demo_reset import execute_demo_reset, list_archived_sessions, restore_latest_archive
 from .integrations import load_settings
+from .powerbi_cloud import get_powerbi_state, sync_powerbi_cloud
 from .remediation import (
     apply_local_remediation,
     close_github_remediation_prs,
@@ -189,6 +190,7 @@ def ecosystem_links() -> dict:
         "github_security_url": f"https://github.com/{gh_repo}/security" if gh_repo else None,
         "powerbi_csv_url": "/api/metricas-powerbi.csv",
         "powerbi_json_url": "/api/metricas-powerbi.json",
+        "powerbi_web_url": get_powerbi_state(OUTPUT).get("report_url"),
         "security_copilot_url": "/copilot/security-copilot-skill.yaml",
         "openapi_url": "/copilot/openapi.yaml",
         "sandbox": _probe_local_sandbox(),
@@ -253,6 +255,7 @@ class DemoHandler(BaseHTTPRequestHandler):
                 "analitica": build_powerbi_metrics(OUTPUT)["kpis"],
                 "archivos_demo": list_archived_sessions(OUTPUT),
                 "remediacion_activa": public_remediation_state(OUTPUT),
+                "powerbi": get_powerbi_state(OUTPUT),
             })
             return
         if clean_path == "/api/metricas-powerbi.json":
@@ -295,6 +298,9 @@ class DemoHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/remediacion/pr/cerrar":
             self._handle_remediation_pr_close()
+            return
+        if self.path == "/api/powerbi/publicar":
+            self._handle_powerbi_publish()
             return
         if self.path == "/api/demo/reiniciar":
             self._handle_demo_reset()
@@ -502,6 +508,24 @@ class DemoHandler(BaseHTTPRequestHandler):
             "remediacion_activa": public_remediation_state(OUTPUT),
         })
 
+    def _handle_powerbi_publish(self) -> None:
+        try:
+            payload = self._read_json_body(512)
+            recreate = bool(payload.get("regenerar", False))
+        except (ValueError, TypeError):
+            self.send_json(400, {"error": "Parámetros inválidos para publicar en Power BI."})
+            return
+        try:
+            with EVAL_LOCK:
+                state = sync_powerbi_cloud(OUTPUT, ensure_report=True, recreate_report=recreate)
+        except Exception as exc:
+            self.send_json(500, {"error": f"No se pudo sincronizar con Power BI Service: {exc}"})
+            return
+        self.send_json(200, {
+            "powerbi": state,
+            "analitica": build_powerbi_metrics(OUTPUT)["kpis"],
+        })
+
     def _handle_demo_reset(self) -> None:
         try:
             payload = self._read_json_body(512)
@@ -510,6 +534,7 @@ class DemoHandler(BaseHTTPRequestHandler):
             reset_boards = bool(payload.get("boards", False))
             reset_code = bool(payload.get("codigo", True))
             reset_prs = bool(payload.get("prs", True))
+            sync_pbi = bool(payload.get("powerbi", False))
         except (ValueError, TypeError):
             self.send_json(400, {"error": "Parámetros de reinicio de demostración inválidos."})
             return
@@ -525,6 +550,7 @@ class DemoHandler(BaseHTTPRequestHandler):
                     reset_boards=reset_boards,
                     reset_code=reset_code,
                     reset_github_prs=reset_prs,
+                    sync_powerbi=sync_pbi,
                 )
         except Exception as exc:
             self.send_json(500, {"error": f"No se pudo reiniciar el estado de demostración: {exc}"})

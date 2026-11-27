@@ -10,6 +10,7 @@ import tempfile
 from threading import Event
 import unittest
 from unittest.mock import patch
+import zipfile
 
 import httpx2
 from anthropic import AsyncAnthropic
@@ -21,6 +22,7 @@ from assessment.demo_reset import execute_demo_reset, restore_latest_archive
 from assessment.evidence import APP, CRITERION, PROJECT, collect, read_cobertura
 from assessment.integrations import audit_repo_governance, parse_boards_criteria
 from assessment.policy import evaluate, evaluate_criteria_matrix, source_tests
+from assessment.powerbi_cloud import _build_executive_pbix, sync_powerbi_cloud
 from assessment.remediation import (
     apply_local_remediation,
     close_github_remediation_prs,
@@ -480,6 +482,27 @@ class DevSecOpsRegression(unittest.TestCase):
             csv_text = render_powerbi_csv(runs_dir)
             self.assertIn("ejecucion_id,fecha_utc,version", csv_text)
             self.assertIn(run_id, csv_text)
+
+            # Auto-generated Live-Connection PBIX & Power BI Service sync
+            pbix_raw = _build_executive_pbix("ds-1234")
+            with zipfile.ZipFile(Path(base / "check.pbix").write_bytes(pbix_raw) and (base / "check.pbix")) as zf:
+                self.assertIn("Report/Layout", zf.namelist())
+                layout_data = json.loads(zf.read("Report/Layout").decode("utf-16-le"))
+                self.assertEqual(len(layout_data["sections"][0]["visualContainers"]), 7)
+
+            with (patch("assessment.powerbi_cloud._az_token", return_value="pbi_tok"),
+                  patch("assessment.powerbi_cloud._pbi_json", side_effect=lambda method, url, tok, body=None, timeout=20: (
+                      {"value": [{"id": "ds-1", "name": "NextGen DevSecOps Assessment"}]} if url.endswith("/datasets")
+                      else {"id": "ds-1", "webUrl": "https://app.powerbi.com/groups/me/datasets/ds-1"} if "/datasets/ds-1" in url and method == "GET"
+                      else {"value": []} if url.endswith("/reports")
+                      else {}
+                  )),
+                  patch("assessment.powerbi_cloud._upload_executive_pbix", return_value={
+                      "id": "rep-1", "webUrl": "https://app.powerbi.com/groups/me/reports/rep-1"
+                  })):
+                pbi_res = sync_powerbi_cloud(runs_dir, ensure_report=True)
+                self.assertEqual(pbi_res["report_url"], "https://app.powerbi.com/groups/me/reports/rep-1")
+                self.assertEqual(pbi_res["filas_sincronizadas"], 2)
 
             # Reversible multi-demo reset & restore
             fake_repo = base / "repo"

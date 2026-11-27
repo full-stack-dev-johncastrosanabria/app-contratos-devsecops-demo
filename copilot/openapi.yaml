@@ -42,6 +42,13 @@ paths:
             text/csv:
               schema:
                 type: string
+  /api/powerbi/publicar:
+    post:
+      operationId: publicarReporteEjecutivoPowerBI
+      summary: Sincroniza el Push Dataset en tiempo real y genera/abre el reporte visual ejecutivo directamente en app.powerbi.com.
+      responses:
+        "200":
+          description: URL directa del reporte publicado en Power BI Service.
   /api/evaluar:
     post:
       operationId: ejecutarEvaluacionEntrega

@@ -26,6 +26,7 @@ from .integrations import (
     upsert_boards_task,
 )
 from .policy import SourceTest, evaluate, evaluate_criteria_matrix, source_tests, validate_references
+from .powerbi_cloud import get_powerbi_state
 
 AZURE_KEYS = ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_CHAT_COMPLETION_MODEL", "AZURE_OPENAI_API_KEY")
 ANTHROPIC_KEYS = ("ANTHROPIC_CHAT_MODEL", "ANTHROPIC_API_KEY")
@@ -619,17 +620,25 @@ def build_eight_stages(report: dict, devsecops_data: dict) -> list[dict]:
                 f"{tel['total_solicitudes']} req ({tel['tasa_error_pct']}% 5xx · {tel['latencia_promedio_ms']} ms prom.) · Power BI activo"
                 if tel.get("disponible") else tel.get("motivo", "Ingesta inicial en progreso")
             ),
-            "descripcion": "Compara telemetría KQL reciente vs línea base en Log Analytics y expone datasets longitudinales para Power BI y Fabric.",
+            "descripcion": "Compara telemetría KQL reciente vs línea base en Log Analytics y publica en vivo el reporte ejecutivo en app.powerbi.com.",
             "datos": {
                 "Ventana KQL": tel.get("ventana", "últimas 24h"),
                 "Solicitudes totales": str(tel.get("total_solicitudes", 0)),
                 "Errores servidor (5xx)": f"{tel.get('fallos_5xx', 0)} ({tel.get('tasa_error_pct', 0.0)}%)",
                 "Latencia promedio": f"{tel.get('latencia_promedio_ms', 0.0)} ms",
                 "Comparación pre/post": tel.get("comparacion_base") or "Sin línea base previa",
-                "Conector Power BI": "Activo (/api/metricas-powerbi.csv)",
+                "Conector Power BI": (
+                    "Reporte publicado en app.powerbi.com"
+                    if (pbi_state := get_powerbi_state(Path(__file__).with_name("runs"))).get("report_url")
+                    else "Activo (/api/metricas-powerbi.csv)"
+                ),
             },
-            "url": "/api/metricas-powerbi.json",
-            "etiqueta_url": "Abrir métricas JSON para Power BI",
+            "url": pbi_state.get("report_url") or "/api/metricas-powerbi.json",
+            "etiqueta_url": (
+                "Abrir reporte ejecutivo en Power BI Web"
+                if pbi_state.get("report_url")
+                else "Abrir métricas JSON para Power BI"
+            ),
         },
         {
             "numero": 8,

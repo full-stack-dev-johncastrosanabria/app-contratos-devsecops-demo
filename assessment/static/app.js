@@ -20,6 +20,7 @@ const resetRunsChk = document.querySelector("#reset-runs-chk");
 const resetSandboxChk = document.querySelector("#reset-sandbox-chk");
 const resetBoardsChk = document.querySelector("#reset-boards-chk");
 const resetCodePrsChk = document.querySelector("#reset-code-prs-chk");
+const openPowerBiWebBtn = document.querySelector("#open-powerbi-web-btn");
 
 const sandboxPill = document.querySelector("#sandbox-pill");
 const sandboxText = document.querySelector("#sandbox-text");
@@ -597,6 +598,44 @@ async function refreshAnalyticsStrip() {
     // Analytics strip degrades silently when offline.
   }
 }
+
+function updatePowerBiNavLink(reportUrl) {
+  const navPbi = document.querySelector("#nav-powerbi");
+  if (!navPbi || !reportUrl) return;
+  navPbi.href = reportUrl;
+  const lbl = document.querySelector("#nav-powerbi-label");
+  if (lbl) lbl.textContent = "Power BI · Reporte Web";
+}
+
+openPowerBiWebBtn?.addEventListener("click", async () => {
+  openPowerBiWebBtn.disabled = true;
+  const popup = window.open("about:blank", "nextgen_powerbi_web");
+  setStatus("Sincronizando corridas en tiempo real y abriendo reporte ejecutivo en app.powerbi.com…", "busy");
+  try {
+    const res = await fetch("/api/powerbi/publicar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ regenerar: false }),
+    });
+    const data = await readJson(res);
+    if (!res.ok) throw new Error(data.error || "No se pudo sincronizar el reporte en Power BI Service.");
+    if (data.analitica) renderValueKpis(data.analitica);
+    const targetUrl = data.powerbi?.report_url || data.powerbi?.dataset_url;
+    if (targetUrl) {
+      updatePowerBiNavLink(targetUrl);
+      if (popup && !popup.closed) popup.location.href = targetUrl;
+    }
+    setStatus(
+      `Reporte ejecutivo actualizado en Power BI Web (${data.powerbi?.filas_sincronizadas ?? 0} corridas sincronizadas).`,
+      "pass"
+    );
+  } catch (err) {
+    if (popup && !popup.closed) popup.close();
+    setStatus(describeFetchError(err, "No se pudo publicar el reporte en Power BI Service."), "error");
+  } finally {
+    openPowerBiWebBtn.disabled = false;
+  }
+});
 
 function createSummary(labelText) {
   const summary = document.createElement("summary");
@@ -1384,6 +1423,7 @@ demoResetApplyBtn?.addEventListener("click", async () => {
         boards: resetBd,
         codigo: resetCodeAndPrs,
         prs: resetCodeAndPrs,
+        powerbi: resetRuns,
       }),
     });
     const data = await readJson(res);
@@ -2935,6 +2975,7 @@ async function initEcosystem() {
       ["#nav-boards", eco.boards_url],
       ["#nav-pr", eco.github_pr_url],
       ["#nav-sec", eco.github_security_url],
+      ["#nav-powerbi", eco.powerbi_web_url || data.powerbi?.report_url],
     ];
     for (const [sel, url] of navMap) {
       const link = document.querySelector(sel);
@@ -2945,6 +2986,9 @@ async function initEcosystem() {
       }
     }
 
+    if (eco.powerbi_web_url || data.powerbi?.report_url) {
+      updatePowerBiNavLink(eco.powerbi_web_url || data.powerbi.report_url);
+    }
     updateSandboxBanner(eco.sandbox);
 
     const params = new URLSearchParams(window.location.search);

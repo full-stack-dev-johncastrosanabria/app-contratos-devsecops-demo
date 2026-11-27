@@ -96,10 +96,18 @@ def restore_latest_archive(runs_dir: Path, session_name: str | None = None) -> d
             restored += 1
 
     src.rmdir()
+    pbi_sync = None
+    if (runs_dir / "_estado_powerbi.json").is_file():
+        try:
+            from .powerbi_cloud import sync_powerbi_cloud
+            pbi_sync = sync_powerbi_cloud(runs_dir, ensure_report=False)
+        except Exception:
+            pbi_sync = None
     return {
         "sesion_restaurada": chosen,
         "corridas_restauradas": restored,
         "respaldo_previo": previous_backup,
+        "powerbi": pbi_sync,
         "archivos_disponibles": list_archived_sessions(runs_dir),
     }
 
@@ -199,6 +207,7 @@ def execute_demo_reset(
     reset_boards: bool = False,
     reset_code: bool = True,
     reset_github_prs: bool = True,
+    sync_powerbi: bool = False,
 ) -> dict:
     from .remediation import close_github_remediation_prs, revert_local_remediation
 
@@ -209,6 +218,7 @@ def execute_demo_reset(
         "codigo_revertido": [],
         "prs_cerrados": [],
         "boards": None,
+        "powerbi": None,
         "archivos_disponibles": [],
     }
     if reset_code:
@@ -219,6 +229,12 @@ def execute_demo_reset(
         summary["sandbox_archivos_limpiados"] = clean_sandbox_data(repo_root)
     if reset_runs:
         summary["corridas"] = archive_runs(runs_dir)
+    if sync_powerbi and (runs_dir / "_estado_powerbi.json").is_file():
+        try:
+            from .powerbi_cloud import sync_powerbi_cloud
+            summary["powerbi"] = sync_powerbi_cloud(runs_dir, ensure_report=False)
+        except Exception:
+            summary["powerbi"] = {"sincronizado": False}
     if reset_boards:
         summary["boards"] = reset_boards_demo_state()
     summary["archivos_disponibles"] = list_archived_sessions(runs_dir)

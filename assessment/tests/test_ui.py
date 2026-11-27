@@ -72,11 +72,15 @@ class DemoHTTP(unittest.TestCase):
                     with (patch("assessment.ui.apply_local_remediation", return_value={"aplicado": True, "version": "v2", "archivo": "v2/src/Contratos/Renovaciones.cs"}),
                           patch("assessment.ui.revert_local_remediation", return_value=["v2/src/Contratos/Renovaciones.cs"]),
                           patch("assessment.ui.create_github_remediation_pr", return_value={"operacion": "creado", "pr": {"numero": 15, "url": "https://github.com/demo/pull/15"}, "estado_remediacion": {"parches_locales": {}, "prs_efimeros": {}}}),
-                          patch("assessment.ui.close_github_remediation_prs", return_value=[{"version": "v2", "numero": 15}])):
+                          patch("assessment.ui.close_github_remediation_prs", return_value=[{"version": "v2", "numero": 15}]),
+                          patch("assessment.ui.sync_powerbi_cloud", return_value={"sincronizado": True, "report_url": "https://app.powerbi.com/groups/me/reports/demo", "filas_sincronizadas": 1})):
                         self.assertEqual(request("POST", "/api/remediacion/aplicar", json.dumps({"ejecucion": run_id, "modo": "solo-evidencia"}), origin)[0], 200)
                         self.assertEqual(request("POST", "/api/remediacion/revertir", '{"version":"v2","modo":"solo-evidencia"}', origin)[0], 200)
                         self.assertEqual(request("POST", "/api/remediacion/pr", json.dumps({"ejecucion": run_id}), origin)[0], 200)
                         self.assertEqual(request("POST", "/api/remediacion/pr/cerrar", '{"version":"v2"}', origin)[0], 200)
+                        st_pbi, body_pbi = request("POST", "/api/powerbi/publicar", "{}", origin)
+                        self.assertEqual(st_pbi, 200)
+                        self.assertIn("app.powerbi.com", json.loads(body_pbi)["powerbi"]["report_url"])
                     self.assertEqual(assess.await_count, 3)
 
                     # Reversible demo reset & restore over HTTP
