@@ -26,6 +26,15 @@ from .remediation import (
     public_remediation_state,
     revert_local_remediation,
 )
+from .vulnerabilities import (
+    apply_vuln_remediation,
+    close_vuln_github_prs,
+    create_vuln_github_pr,
+    generate_vuln_remediation,
+    public_vuln_state,
+    revert_vuln_remediation,
+    scan_vulnerabilities,
+)
 from .workflow import DecisionAlreadyResolved
 
 STATIC = Path(__file__).with_name("static")
@@ -134,6 +143,7 @@ def _format_summary(report: dict) -> dict:
         "politica_version",
         "criterios_evaluados",
         "cobertura",
+        "reporte_vulnerabilidades",
         "investigacion_secops",
         "etapas_devsecops",
         "accion_propuesta",
@@ -255,7 +265,21 @@ class DemoHandler(BaseHTTPRequestHandler):
                 "analitica": build_powerbi_metrics(OUTPUT)["kpis"],
                 "archivos_demo": list_archived_sessions(OUTPUT),
                 "remediacion_activa": public_remediation_state(OUTPUT),
+                "vulnerabilidades": {
+                    ver: scan_vulnerabilities(ROOT, version=ver, runs_dir=OUTPUT)
+                    for ver in ("v1", "v2", "v3")
+                },
+                "estado_vulnerabilidades": public_vuln_state(OUTPUT),
                 "powerbi": get_powerbi_state(OUTPUT),
+            })
+            return
+        if clean_path == "/api/vulnerabilidades":
+            self.send_json(200, {
+                "vulnerabilidades": {
+                    ver: scan_vulnerabilities(ROOT, version=ver, runs_dir=OUTPUT)
+                    for ver in ("v1", "v2", "v3")
+                },
+                "estado_vulnerabilidades": public_vuln_state(OUTPUT),
             })
             return
         if clean_path == "/api/metricas-powerbi.json":
@@ -301,6 +325,21 @@ class DemoHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/powerbi/publicar":
             self._handle_powerbi_publish()
+            return
+        if self.path == "/api/vulnerabilidades/remediar":
+            self._handle_vuln_draft()
+            return
+        if self.path == "/api/vulnerabilidades/aplicar":
+            self._handle_vuln_apply()
+            return
+        if self.path == "/api/vulnerabilidades/revertir":
+            self._handle_vuln_revert()
+            return
+        if self.path == "/api/vulnerabilidades/pr":
+            self._handle_vuln_pr()
+            return
+        if self.path == "/api/vulnerabilidades/pr/cerrar":
+            self._handle_vuln_pr_close()
             return
         if self.path == "/api/demo/reiniciar":
             self._handle_demo_reset()
@@ -508,6 +547,158 @@ class DemoHandler(BaseHTTPRequestHandler):
             "remediacion_activa": public_remediation_state(OUTPUT),
         })
 
+    def _refresh_cached_stage3(self) -> dict[str, dict]:
+        vulns_by_ver = {
+            ver: scan_vulnerabilities(ROOT, version=ver, runs_dir=OUTPUT)
+            for ver in ("v1", "v2", "v3")
+        }
+        if OUTPUT.is_dir():
+            for report_file in OUTPUT.glob("*/informe.json"):
+                if report_file.parent.name.startswith("_"):
+                    continue
+                try:
+                    data = json.loads(report_file.read_text(encoding="utf-8"))
+                    ver = (data.get("ejecucion") or {}).get("version")
+                    if ver not in vulns_by_ver:
+                        continue
+                    vscan = vulns_by_ver[ver]
+                    data["reporte_vulnerabilidades"] = vscan
+                    for st in data.get("etapas_devsecops") or []:
+                        if st.get("numero") == 3:
+                            v_open = vscan["abiertas"]
+                            v_mit = vscan["mitigadas"]
+                            v_tot = vscan["total"]
+                            st["estado"] = (
+                                "verificado" if v_open == 0 and v_mit == v_tot
+                                else "atencion" if vscan.get("altas_abiertas", 0) > 0
+                                else "informativo"
+                            )
+                            st["resumen"] = f"Reporte SecOps: {v_open} abiertas · {v_mit}/{v_tot} mitigadas"
+                            if isinstance(st.get("datos"), dict):
+                                st["datos"]["Vulnerabilidades auditadas"] = f"{v_open} abiertas · {v_mit} mitigadas (de {v_tot})"
+                    tmp = report_file.with_suffix(".json.tmp")
+                    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                    tmp.replace(report_file)
+                except Exception:
+                    continue
+        return vulns_by_ver
+
+    def _handle_vuln_draft(self) -> None:
+        try:
+            payload = self._read_json_body(512)
+            vuln_id = str(payload["id"])
+            version = payload.get("version", "v1")
+            use_ai = bool(payload.get("usar_ia", False))
+            if vuln_id not in ("SEC-CI-001", "SEC-DOCKER-001", "SEC-K8S-001", "SEC-WEB-001") or version not in ("v1", "v2", "v3"):
+                raise ValueError
+        except (ValueError, KeyError, TypeError):
+            self.send_json(400, {"error": "Parámetros inválidos para investigar la vulnerabilidad."})
+            return
+        try:
+            draft = asyncio.run(generate_vuln_remediation(ROOT, OUTPUT, vuln_id, version=version, use_ai=use_ai))
+        except Exception as exc:
+            self.send_json(500, {"error": f"No se pudo generar la remediación SecOps: {exc}"})
+            return
+        self.send_json(200, draft)
+
+    def _handle_vuln_apply(self) -> None:
+        try:
+            payload = self._read_json_body(512)
+            vuln_id = str(payload["id"])
+            version = payload.get("version", "v1")
+            origen = str(payload.get("origen") or "agente_secops")[:40]
+            if vuln_id not in ("SEC-CI-001", "SEC-DOCKER-001", "SEC-K8S-001", "SEC-WEB-001", "TODAS") or version not in ("v1", "v2", "v3"):
+                raise ValueError
+        except (ValueError, KeyError, TypeError):
+            self.send_json(400, {"error": "Solicitud inválida para mitigar vulnerabilidad."})
+            return
+        try:
+            with EVAL_LOCK:
+                res = apply_vuln_remediation(ROOT, OUTPUT, vuln_id, version=version, origen=origen)
+                vulns_by_ver = self._refresh_cached_stage3()
+        except Exception as exc:
+            self.send_json(500, {"error": f"No se pudo aplicar la mitigación SecOps: {exc}"})
+            return
+        self.send_json(200, {
+            **res,
+            "vulnerabilidades": vulns_by_ver,
+            "ultimos": latest_reports(OUTPUT),
+        })
+
+    def _handle_vuln_revert(self) -> None:
+        try:
+            payload = self._read_json_body(512)
+            vuln_id = payload.get("id")
+            version = payload.get("version", "v1")
+            if vuln_id is not None and vuln_id not in ("SEC-CI-001", "SEC-DOCKER-001", "SEC-K8S-001", "SEC-WEB-001", "TODAS"):
+                raise ValueError
+            if version not in ("v1", "v2", "v3"):
+                raise ValueError
+        except (ValueError, TypeError):
+            self.send_json(400, {"error": "Parámetros inválidos para revertir mitigación SecOps."})
+            return
+        try:
+            with EVAL_LOCK:
+                res = revert_vuln_remediation(ROOT, OUTPUT, vuln_id=vuln_id, version=version)
+                vulns_by_ver = self._refresh_cached_stage3()
+        except Exception as exc:
+            self.send_json(500, {"error": f"No se pudo revertir la mitigación SecOps: {exc}"})
+            return
+        self.send_json(200, {
+            **res,
+            "vulnerabilidades": vulns_by_ver,
+            "ultimos": latest_reports(OUTPUT),
+        })
+
+    def _handle_vuln_pr(self) -> None:
+        try:
+            payload = self._read_json_body(512)
+            vuln_id = str(payload["id"])
+            version = payload.get("version", "v1")
+            if vuln_id not in ("SEC-CI-001", "SEC-DOCKER-001", "SEC-K8S-001", "SEC-WEB-001") or version not in ("v1", "v2", "v3"):
+                raise ValueError
+        except (ValueError, KeyError, TypeError):
+            self.send_json(400, {"error": "Solicitud inválida para abrir PR SecOps."})
+            return
+        try:
+            with EVAL_LOCK:
+                res = asyncio.run(create_vuln_github_pr(ROOT, OUTPUT, vuln_id, version=version))
+        except Exception as exc:
+            self.send_json(500, {"error": f"No se pudo abrir el PR SecOps en GitHub: {exc}"})
+            return
+        self.send_json(200, {
+            **res,
+            "vulnerabilidades": {
+                ver: scan_vulnerabilities(ROOT, version=ver, runs_dir=OUTPUT)
+                for ver in ("v1", "v2", "v3")
+            },
+        })
+
+    def _handle_vuln_pr_close(self) -> None:
+        try:
+            payload = self._read_json_body(512)
+            vuln_id = payload.get("id")
+            version = payload.get("version", "v1")
+            if version not in ("v1", "v2", "v3"):
+                raise ValueError
+        except (ValueError, TypeError):
+            self.send_json(400, {"error": "Parámetros inválidos para cerrar PR SecOps."})
+            return
+        try:
+            with EVAL_LOCK:
+                closed = close_vuln_github_prs(OUTPUT, vuln_id=vuln_id, version=version)
+        except Exception as exc:
+            self.send_json(500, {"error": f"No se pudo cerrar el PR SecOps: {exc}"})
+            return
+        self.send_json(200, {
+            "prs_cerrados": closed,
+            "estado_vulnerabilidades": public_vuln_state(OUTPUT),
+            "vulnerabilidades": {
+                ver: scan_vulnerabilities(ROOT, version=ver, runs_dir=OUTPUT)
+                for ver in ("v1", "v2", "v3")
+            },
+        })
+
     def _handle_powerbi_publish(self) -> None:
         try:
             payload = self._read_json_body(512)
@@ -561,6 +752,11 @@ class DemoHandler(BaseHTTPRequestHandler):
             "analitica": build_powerbi_metrics(OUTPUT)["kpis"],
             "sandbox": _probe_local_sandbox(),
             "remediacion_activa": public_remediation_state(OUTPUT),
+            "vulnerabilidades": {
+                ver: scan_vulnerabilities(ROOT, version=ver, runs_dir=OUTPUT)
+                for ver in ("v1", "v2", "v3")
+            },
+            "estado_vulnerabilidades": public_vuln_state(OUTPUT),
         })
 
     def _handle_demo_restore(self) -> None:

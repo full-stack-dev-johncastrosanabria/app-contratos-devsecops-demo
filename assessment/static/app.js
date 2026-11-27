@@ -268,6 +268,8 @@ const provenanceByVersion = new Map();
 
 let cachedLatest = {};
 let activeRemediationState = { parches_locales: {}, prs_efimeros: {} };
+let vulnerabilitiesByVersion = {};
+let selectedVulnForStage8 = "SEC-CI-001";
 let activeController = null;
 let filterDiffOnly = false;
 let inspectedStage = null;
@@ -1161,6 +1163,12 @@ function openStageInspector(stageNumber, focusVersion, origin = null, { refresh 
     stageInspectorBody.append(dl);
   }
 
+  if (baseMeta.numero === 3) {
+    renderStage3VulnReport(stageInspectorBody, inspectedVersion);
+  } else if (baseMeta.numero === 8) {
+    renderStage8SecOpsWorkbench(stageInspectorBody, inspectedVersion);
+  }
+
   const loaded = versions.filter((ver) => reportsByVersion.get(ver)?.etapas_devsecops?.some((x) => x.numero === baseMeta.numero));
   const signatures = new Set(loaded.map((ver) => {
     const st = reportsByVersion.get(ver).etapas_devsecops.find((x) => x.numero === baseMeta.numero);
@@ -1429,6 +1437,7 @@ demoResetApplyBtn?.addEventListener("click", async () => {
     const data = await readJson(res);
     if (!res.ok) throw new Error(data.error || "No se pudo reiniciar el entorno de demostración.");
     if (data.remediacion_activa) activeRemediationState = data.remediacion_activa;
+    if (data.vulnerabilidades) vulnerabilitiesByVersion = data.vulnerabilidades;
     if (resetRuns) {
       clearAllCardsToIdle();
     } else {
@@ -2332,6 +2341,424 @@ function renderGovernance(card, version, runId, action, focusResult = false, clo
   box.append(panel);
 }
 
+function syncVulnPayload(data, currentVer) {
+  if (data.vulnerabilidades) {
+    vulnerabilitiesByVersion = data.vulnerabilidades;
+  } else if (data.reporte_vulnerabilidades && currentVer) {
+    vulnerabilitiesByVersion[currentVer] = data.reporte_vulnerabilidades;
+  }
+  if (data.ultimos) {
+    cachedLatest = data.ultimos;
+    for (const [ver, rep] of Object.entries(data.ultimos)) {
+      if (reportsByVersion.has(ver)) {
+        const current = reportsByVersion.get(ver);
+        current.reporte_vulnerabilidades = rep.reporte_vulnerabilidades;
+        if (rep.etapas_devsecops?.length) current.etapas_devsecops = rep.etapas_devsecops;
+      }
+    }
+  }
+  refreshStageViews();
+}
+
+function renderStage3VulnReport(parent, version) {
+  const vscan = vulnerabilitiesByVersion[version] || reportsByVersion.get(version)?.reporte_vulnerabilidades;
+  if (!vscan || !Array.isArray(vscan.hallazgos)) return;
+
+  const section = element("div", null, "vuln-section");
+  const headBar = element("div", null, "vuln-head-bar");
+  headBar.append(
+    element("h4", `Reporte formal de vulnerabilidades · ${vscan.abiertas} abiertas · ${vscan.mitigadas}/${vscan.total} mitigadas`, "inspector-compare-title")
+  );
+  if (vscan.abiertas > 0) {
+    const jumpAllBtn = element("button", "Ir a Etapa 8 · Remediación con Agente SecOps →", "btn-primary");
+    jumpAllBtn.type = "button";
+    jumpAllBtn.addEventListener("click", () => {
+      const firstOpen = vscan.hallazgos.find((h) => h.estado === "abierta");
+      if (firstOpen) selectedVulnForStage8 = firstOpen.id;
+      openStageInspector(8, version);
+    });
+    headBar.append(jumpAllBtn);
+  }
+  section.append(headBar);
+
+  const wrapper = element("div", null, "table-wrapper vuln-table-wrap");
+  wrapper.tabIndex = 0;
+  wrapper.setAttribute("role", "region");
+  wrapper.setAttribute("aria-labelledby", "vuln-table-caption");
+
+  const table = element("table", null, "vuln-table");
+  const caption = element("caption", `Hallazgos SAST, Contenedor, Kubernetes IaC y API en ${version}`);
+  caption.id = "vuln-table-caption";
+  table.append(caption);
+
+  const thead = document.createElement("thead");
+  const htr = document.createElement("tr");
+  for (const colTitle of ["Vulnerabilidad", "Severidad", "Ubicación", "Estado", "Acción"]) {
+    const th = element("th", colTitle);
+    th.scope = "col";
+    htr.append(th);
+  }
+  thead.append(htr);
+
+  const tbody = document.createElement("tbody");
+  for (const item of vscan.hallazgos) {
+    const tr = document.createElement("tr");
+    const rowTh = document.createElement("th");
+    rowTh.scope = "row";
+    const titleWrap = element("div", null, "vuln-row-title");
+    titleWrap.append(
+      element("strong", `${item.id} · ${item.categoria}`),
+      element("span", `${item.titulo} (${item.regla})`)
+    );
+    rowTh.append(titleWrap);
+
+    const tdSev = document.createElement("td");
+    const sevBadge = element("span", null, "severity-badge");
+    sevBadge.dataset.level = severityLevel(item.severidad);
+    sevBadge.append(
+      svgIcon(sevBadge.dataset.level === "high" ? "bang" : "warn", 12),
+      element("span", item.severidad)
+    );
+    tdSev.append(sevBadge);
+
+    const tdLoc = document.createElement("td");
+    tdLoc.append(element("code", `${item.archivo}:${item.linea}`));
+
+    const tdState = document.createElement("td");
+    const stBadge = element("span", null, "badge");
+    setBadge(stBadge, item.estado === "mitigada" ? "pass" : "fail", item.estado === "mitigada" ? "Mitigada" : "Abierta");
+    tdState.append(stBadge);
+
+    const tdAct = document.createElement("td");
+    const goBtn = element(
+      "button",
+      item.estado === "abierta" ? "Corregir en Etapa 8 →" : "Gestionar en Etapa 8",
+      item.estado === "abierta" ? "btn-secondary" : "btn-ghost"
+    );
+    goBtn.type = "button";
+    goBtn.addEventListener("click", () => {
+      selectedVulnForStage8 = item.id;
+      openStageInspector(8, version);
+    });
+    tdAct.append(goBtn);
+
+    tr.append(rowTh, tdSev, tdLoc, tdState, tdAct);
+    tbody.append(tr);
+  }
+
+  table.append(thead, tbody);
+  wrapper.append(table);
+  section.append(wrapper);
+  parent.append(section);
+}
+
+function renderStage8SecOpsWorkbench(parent, version) {
+  const vscan = vulnerabilitiesByVersion[version] || reportsByVersion.get(version)?.reporte_vulnerabilidades;
+  if (!vscan || !Array.isArray(vscan.hallazgos)) return;
+
+  const bench = element("div", null, "secops-workbench");
+  const headBar = element("div", null, "vuln-head-bar");
+  headBar.append(
+    element(
+      "h4",
+      `Mesa de remediación SecOps con Agente IA (Etapa 3 → Etapa 8) · ${vscan.abiertas} abiertas · ${vscan.mitigadas}/${vscan.total} mitigadas`,
+      "inspector-compare-title"
+    )
+  );
+  const backStage3Btn = element("button", "← Ver reporte en Etapa 3", "btn-ghost");
+  backStage3Btn.type = "button";
+  backStage3Btn.addEventListener("click", () => openStageInspector(3, version));
+  headBar.append(backStage3Btn);
+  bench.append(headBar);
+
+  const controlsRow = element("div", null, "secops-controls-grid");
+  const selectWrap = element("div", null, "field-group");
+  const selectLabel = element("label", "Vulnerabilidad detectada en Etapa 3");
+  selectLabel.htmlFor = "secops-vuln-select";
+  const selectEl = document.createElement("select");
+  selectEl.id = "secops-vuln-select";
+  for (const h of vscan.hallazgos) {
+    const opt = document.createElement("option");
+    opt.value = h.id;
+    opt.textContent = `[${h.estado === "mitigada" ? "Mitigada" : "Abierta · " + h.severidad}] ${h.id} — ${h.titulo} (${h.archivo})`;
+    if (h.id === selectedVulnForStage8) opt.selected = true;
+    selectEl.append(opt);
+  }
+  selectWrap.append(selectLabel, selectEl);
+
+  const quickButtons = element("div", null, "rem-actions");
+  const agentDraftBtn = element("button", "Investigar con Agente SecOps (Foundry)", "btn-primary");
+  agentDraftBtn.type = "button";
+  const detDraftBtn = element("button", "Parche determinista · 0 tokens", "btn-secondary");
+  detDraftBtn.type = "button";
+  quickButtons.append(agentDraftBtn, detDraftBtn);
+
+  if (vscan.abiertas > 1) {
+    const fixAllBtn = element("button", `Mitigar las ${vscan.abiertas} abiertas en lote`, "btn-ghost");
+    fixAllBtn.type = "button";
+    fixAllBtn.addEventListener("click", async () => {
+      if (fixAllBtn.dataset.armed !== "true") {
+        arm(fixAllBtn, "Confirmar mitigación en lote + reauditoría");
+        return;
+      }
+      disarm(fixAllBtn);
+      fixAllBtn.disabled = true;
+      setStatus("Aplicando endurecimiento SecOps en lote y reauditando Etapa 3…", "busy");
+      try {
+        const res = await fetch("/api/vulnerabilidades/aplicar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: "TODAS", version, origen: "lote_secops" }),
+        });
+        const data = await readJson(res);
+        if (!res.ok) throw new Error(data.error || "No se pudo aplicar la mitigación en lote.");
+        syncVulnPayload(data, version);
+        openStageInspector(8, version, null, { refresh: true });
+        setStatus("Las 4 vulnerabilidades fueron mitigadas y la Etapa 3 quedó en estado Verificado.", "pass");
+      } catch (err) {
+        fixAllBtn.disabled = false;
+        setStatus(describeFetchError(err, "No se pudo completar la mitigación en lote."), "error");
+      }
+    });
+    quickButtons.append(fixAllBtn);
+  }
+
+  controlsRow.append(selectWrap, quickButtons);
+  bench.append(controlsRow);
+
+  const statusSlot = element("div");
+  const outBox = element("div", null, "rem-output");
+  outBox.hidden = true;
+  bench.append(statusSlot, outBox);
+
+  const refreshSelectedStatus = () => {
+    statusSlot.replaceChildren();
+    const current = vscan.hallazgos.find((x) => x.id === selectEl.value) || vscan.hallazgos[0];
+    if (!current) return;
+    selectedVulnForStage8 = current.id;
+
+    if (current.estado === "mitigada") {
+      const b = element("div", null, "rem-state-banner");
+      b.dataset.tone = "pass";
+      b.append(element("span", `${current.id} mitigada en ${current.archivo} · Etapa 3 verificada para este control`));
+      const revBtn = element("button", "Revertir mitigación", "btn-secondary");
+      revBtn.type = "button";
+      revBtn.addEventListener("click", async () => {
+        if (revBtn.dataset.armed !== "true") {
+          arm(revBtn, "¿Restaurar estado vulnerable? Pulsa otra vez");
+          return;
+        }
+        disarm(revBtn);
+        revBtn.disabled = true;
+        setStatus(`Restaurando archivo original de ${current.id}…`, "busy");
+        try {
+          const res = await fetch("/api/vulnerabilidades/revertir", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: current.id, version }),
+          });
+          const data = await readJson(res);
+          if (!res.ok) throw new Error(data.error || "No se pudo revertir la mitigación.");
+          syncVulnPayload(data, version);
+          openStageInspector(8, version, null, { refresh: true });
+          setStatus(`Mitigación de ${current.id} revertida para nueva demostración.`, "pass");
+        } catch (err) {
+          revBtn.disabled = false;
+          setStatus(describeFetchError(err, "No se pudo revertir la mitigación."), "error");
+        }
+      });
+      b.append(revBtn);
+      statusSlot.append(b);
+    }
+
+    if (current.pr_activo) {
+      const prB = element("div", null, "rem-state-banner");
+      const prSpan = element("span", "PR SecOps abierto en GitHub: ");
+      const prLink = document.createElement("a");
+      prLink.href = current.pr_activo.url;
+      prLink.target = "_blank";
+      prLink.rel = "noopener";
+      prLink.append(
+        element("span", `PR #${current.pr_activo.numero} (${current.pr_activo.rama})`),
+        element("span", " (se abre en una nueva pestaña)", "sr-only")
+      );
+      prSpan.append(prLink);
+      const closePrBtn = element("button", "Cerrar PR SecOps", "btn-ghost");
+      closePrBtn.type = "button";
+      closePrBtn.addEventListener("click", async () => {
+        if (closePrBtn.dataset.armed !== "true") {
+          arm(closePrBtn, "¿Cerrar PR SecOps? Pulsa otra vez");
+          return;
+        }
+        disarm(closePrBtn);
+        closePrBtn.disabled = true;
+        try {
+          const res = await fetch("/api/vulnerabilidades/pr/cerrar", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: current.id, version }),
+          });
+          const data = await readJson(res);
+          if (!res.ok) throw new Error(data.error || "No se pudo cerrar el PR SecOps.");
+          syncVulnPayload(data, version);
+          openStageInspector(8, version, null, { refresh: true });
+          setStatus(`PR SecOps #${current.pr_activo.numero} cerrado y rama eliminada.`, "pass");
+        } catch (err) {
+          closePrBtn.disabled = false;
+          setStatus(describeFetchError(err, "No se pudo cerrar el PR SecOps."), "error");
+        }
+      });
+      prB.append(prSpan, closePrBtn);
+      statusSlot.append(prB);
+    }
+  };
+
+  selectEl.addEventListener("change", () => {
+    outBox.hidden = true;
+    refreshSelectedStatus();
+  });
+  refreshSelectedStatus();
+
+  const requestVulnDraft = async (useAi, btn) => {
+    if (useAi && !confirmPaidRun(btn, 1, "agente")) return;
+    const chosenId = selectEl.value;
+    agentDraftBtn.disabled = true;
+    detDraftBtn.disabled = true;
+    setStatus(
+      useAi
+        ? `Agente SecOps (Azure AI Foundry) inspeccionando ${chosenId} y diseñando mitigación…`
+        : `Generando parche determinista de seguridad para ${chosenId}…`,
+      "busy"
+    );
+    try {
+      const res = await fetch("/api/vulnerabilidades/remediar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: chosenId, version, usar_ia: useAi }),
+      });
+      const draft = await readJson(res);
+      if (!res.ok) throw new Error(draft.error || "No se pudo generar la propuesta SecOps.");
+      outBox.replaceChildren();
+      const originLabel = draft.origen === "agente_secops_ia"
+        ? `Agente SecOps IA (${draft.proveedor || "Foundry"})`
+        : "Política determinista SecOps (0 tokens)";
+      outBox.append(
+        element("p", `${originLabel} · ${draft.id} (${draft.regla}) · ${draft.archivo}`, "rem-file"),
+        element("p", `Riesgo: ${draft.analisis_riesgo}`, "source-ref-line"),
+        element("p", `Mitigación: ${draft.estrategia_mitigacion}`, "source-ref-line")
+      );
+      if (draft.traza_herramientas?.length) {
+        outBox.append(element("p", `Herramientas invocadas por el agente: ${draft.traza_herramientas.join(" → ")}`, "rem-disclaimer"));
+      }
+      if (draft.nota_ia) outBox.append(element("p", draft.nota_ia, "rem-disclaimer"));
+
+      const snippetId = `secops-code-${chosenId.toLowerCase()}`;
+      const copyWrap = element("div", null, "copyable");
+      const copySpan = element("span", null, "copy");
+      const copyBtn = element("button", null, "copy-button");
+      copyBtn.type = "button";
+      copyBtn.setAttribute("command", "--copy");
+      copyBtn.setAttribute("commandfor", snippetId);
+      copyBtn.setAttribute("aria-label", `Copiar parche SecOps para ${chosenId}`);
+      const iconSpan = element("span", null, "icon");
+      iconSpan.setAttribute("aria-hidden", "true");
+      iconSpan.append(svgIcon("copy", 13));
+      copyBtn.append(iconSpan, element("span", "Copiar parche"));
+      const tip = element("span", "", "tip");
+      tip.setAttribute("role", "status");
+      copySpan.append(copyBtn, tip);
+
+      const pre = element("pre", null, "rem-pre");
+      pre.tabIndex = 0;
+      const code = element("code", draft.codigo_sugerido);
+      code.id = snippetId;
+      pre.append(code);
+      copyWrap.append(copySpan, pre);
+      outBox.append(copyWrap);
+
+      const execBar = element("div", null, "rem-exec-bar");
+      const applySecBtn = element("button", "Aplicar mitigación y reauditar Etapa 3", "btn-approve");
+      applySecBtn.type = "button";
+      applySecBtn.addEventListener("click", async () => {
+        if (applySecBtn.dataset.armed !== "true") {
+          arm(applySecBtn, `Confirmar endurecimiento en ${draft.archivo}`);
+          return;
+        }
+        disarm(applySecBtn);
+        applySecBtn.disabled = true;
+        prSecBtn.disabled = true;
+        setStatus(`Aplicando mitigación de ${chosenId} y reauditando Etapa 3…`, "busy");
+        try {
+          const r2 = await fetch("/api/vulnerabilidades/aplicar", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: chosenId, version, origen: draft.origen }),
+          });
+          const d2 = await readJson(r2);
+          if (!r2.ok) throw new Error(d2.error || "No se pudo aplicar la mitigación.");
+          syncVulnPayload(d2, version);
+          openStageInspector(8, version, null, { refresh: true });
+          const leftOpen = d2.reporte_vulnerabilidades?.abiertas ?? 0;
+          setStatus(
+            `${chosenId} mitigada y verificada en Etapa 3 (${leftOpen} vulnerabilidad(es) restantes).`,
+            "pass"
+          );
+        } catch (err) {
+          applySecBtn.disabled = false;
+          prSecBtn.disabled = false;
+          setStatus(describeFetchError(err, "No se pudo aplicar la mitigación."), "error");
+        }
+      });
+
+      const prSecBtn = element("button", "Abrir PR SecOps en GitHub", "btn-secondary");
+      prSecBtn.type = "button";
+      prSecBtn.addEventListener("click", async () => {
+        if (prSecBtn.dataset.armed !== "true") {
+          arm(prSecBtn, "Confirmar creación de rama + PR SecOps");
+          return;
+        }
+        disarm(prSecBtn);
+        prSecBtn.disabled = true;
+        applySecBtn.disabled = true;
+        setStatus(`Creando rama y Pull Request SecOps en GitHub para ${chosenId}…`, "busy");
+        try {
+          const r3 = await fetch("/api/vulnerabilidades/pr", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: chosenId, version }),
+          });
+          const d3 = await readJson(r3);
+          if (!r3.ok) throw new Error(d3.error || "No se pudo abrir el PR SecOps.");
+          syncVulnPayload(d3, version);
+          openStageInspector(8, version, null, { refresh: true });
+          setStatus(`PR SecOps #${d3.pr?.numero} abierto en GitHub para ${chosenId}.`, "pass");
+        } catch (err) {
+          prSecBtn.disabled = false;
+          applySecBtn.disabled = false;
+          setStatus(describeFetchError(err, "No se pudo crear el PR SecOps."), "error");
+        }
+      });
+
+      execBar.append(applySecBtn, prSecBtn);
+      outBox.append(execBar);
+      outBox.hidden = false;
+      setStatus(`Propuesta SecOps lista para ${chosenId}.`, "pass");
+    } catch (err) {
+      setStatus(describeFetchError(err, "No se pudo obtener la propuesta SecOps."), "error");
+    } finally {
+      agentDraftBtn.disabled = false;
+      detDraftBtn.disabled = false;
+    }
+  };
+
+  agentDraftBtn.addEventListener("click", () => requestVulnDraft(true, agentDraftBtn));
+  detDraftBtn.addEventListener("click", () => requestVulnDraft(false, detDraftBtn));
+
+  parent.append(bench);
+}
+
+function renderStage8PlaceholderHook() {}
+
 function renderRemediation(card, version, report) {
   const container = card.querySelector(".remediation");
   if (!container) return;
@@ -2376,6 +2803,7 @@ function renderRemediation(card, version, report) {
         const data = await readJson(res);
         if (!res.ok) throw new Error(data.error || "No se pudo revertir el archivo C#.");
         if (data.remediacion_activa) activeRemediationState = data.remediacion_activa;
+    if (data.vulnerabilidades) vulnerabilitiesByVersion = data.vulnerabilidades;
         if (data.analitica) renderValueKpis(data.analitica);
         if (data.informe) {
           cachedLatest[version] = { ...data.informe, registrado_ms: Date.now() };
@@ -2423,6 +2851,7 @@ function renderRemediation(card, version, report) {
         const data = await readJson(res);
         if (!res.ok) throw new Error(data.error || "No se pudo cerrar el PR en GitHub.");
         if (data.remediacion_activa) activeRemediationState = data.remediacion_activa;
+    if (data.vulnerabilidades) vulnerabilitiesByVersion = data.vulnerabilidades;
         renderRemediation(card, version, report);
         setStatus(`PR #${ephemeralPr.numero} cerrado y rama efímera eliminada de GitHub.`, "pass");
       } catch (err) {
@@ -2479,6 +2908,7 @@ function renderRemediation(card, version, report) {
         const data = await readJson(res);
         if (!res.ok) throw new Error(data.error || "No se pudo aplicar la remediación local.");
         if (data.remediacion_activa) activeRemediationState = data.remediacion_activa;
+    if (data.vulnerabilidades) vulnerabilitiesByVersion = data.vulnerabilidades;
         if (data.analitica) renderValueKpis(data.analitica);
         if (data.informe) {
           cachedLatest[version] = { ...data.informe, registrado_ms: Date.now() };
@@ -2519,6 +2949,7 @@ function renderRemediation(card, version, report) {
         const data = await readJson(res);
         if (!res.ok) throw new Error(data.error || "No se pudo abrir el Pull Request en GitHub.");
         if (data.remediacion_activa) activeRemediationState = data.remediacion_activa;
+    if (data.vulnerabilidades) vulnerabilitiesByVersion = data.vulnerabilidades;
         renderRemediation(card, version, report);
         setStatus(
           `Pull Request #${data.pr?.numero} (${data.operacion}) en GitHub con vínculo AB#1.`,
@@ -2642,6 +3073,7 @@ function showReport(card, version, report, options = {}) {
     : `Corrida previa en caché${ts ? ` · ${ts}` : ""}`;
 
   reportsByVersion.set(version, report);
+  if (report.reporte_vulnerabilidades) vulnerabilitiesByVersion[version] = report.reporte_vulnerabilidades;
   provenanceByVersion.set(version, { label: provenanceLabel, isLive });
 
   const verdictInfo = VERDICT_META[report.veredicto] || { state: "unknown", label: report.veredicto };
@@ -2968,6 +3400,7 @@ async function initEcosystem() {
     const eco = data.ecosistema || {};
     cachedLatest = data.ultimos || {};
     if (data.remediacion_activa) activeRemediationState = data.remediacion_activa;
+    if (data.vulnerabilidades) vulnerabilitiesByVersion = data.vulnerabilidades;
     if (data.analitica) renderValueKpis(data.analitica);
     syncArchiveRestoreButton(data.archivos_demo || []);
 

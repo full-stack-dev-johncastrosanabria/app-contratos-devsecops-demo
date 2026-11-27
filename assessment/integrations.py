@@ -241,7 +241,7 @@ def fetch_github_context(settings: dict[str, str], commit_sha: str | None) -> di
         human_pulls = [
             p for p in pulls
             if "dependabot" not in ((p.get("user") or {}).get("login") or "").lower()
-            and not (((p.get("head") or {}).get("ref") or "").startswith("demo/remediacion-"))
+            and not (((p.get("head") or {}).get("ref") or "").startswith(("demo/remediacion-", "secops/fix-")))
         ]
         merged_ab = [
             p for p in human_pulls

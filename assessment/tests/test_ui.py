@@ -81,6 +81,14 @@ class DemoHTTP(unittest.TestCase):
                         st_pbi, body_pbi = request("POST", "/api/powerbi/publicar", "{}", origin)
                         self.assertEqual(st_pbi, 200)
                         self.assertIn("app.powerbi.com", json.loads(body_pbi)["powerbi"]["report_url"])
+
+                    self.assertEqual(request("GET", "/api/vulnerabilidades")[0], 200)
+                    with (patch("assessment.ui.generate_vuln_remediation", return_value={"disponible": True, "id": "SEC-DOCKER-001", "codigo_sugerido": "USER $APP_UID"}),
+                          patch("assessment.ui.apply_vuln_remediation", return_value={"aplicados": ["Dockerfile"], "reporte_vulnerabilidades": {"abiertas": 3, "mitigadas": 1, "total": 4}}),
+                          patch("assessment.ui.revert_vuln_remediation", return_value={"archivos_revertidos": ["Dockerfile"], "reporte_vulnerabilidades": {"abiertas": 4, "mitigadas": 0, "total": 4}})):
+                        self.assertEqual(request("POST", "/api/vulnerabilidades/remediar", '{"id":"SEC-DOCKER-001","version":"v1"}', origin)[0], 200)
+                        self.assertEqual(request("POST", "/api/vulnerabilidades/aplicar", '{"id":"SEC-DOCKER-001","version":"v1"}', origin)[0], 200)
+                        self.assertEqual(request("POST", "/api/vulnerabilidades/revertir", '{"id":"SEC-DOCKER-001","version":"v1"}', origin)[0], 200)
                     self.assertEqual(assess.await_count, 3)
 
                     # Reversible demo reset & restore over HTTP

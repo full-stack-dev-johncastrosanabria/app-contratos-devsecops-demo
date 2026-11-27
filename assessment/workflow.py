@@ -27,6 +27,7 @@ from .integrations import (
 )
 from .policy import SourceTest, evaluate, evaluate_criteria_matrix, source_tests, validate_references
 from .powerbi_cloud import get_powerbi_state
+from .vulnerabilities import scan_vulnerabilities
 
 AZURE_KEYS = ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_CHAT_COMPLETION_MODEL", "AZURE_OPENAI_API_KEY")
 ANTHROPIC_KEYS = ("ANTHROPIC_CHAT_MODEL", "ANTHROPIC_API_KEY")
@@ -380,6 +381,19 @@ def build_eight_stages(report: dict, devsecops_data: dict) -> list[dict]:
     cobertura = report.get("cobertura") or {}
     execution = report["ejecucion"]
     version, commit = execution["version"], execution.get("commit")
+
+    repo_root = Path(__file__).resolve().parent.parent
+    runs_dir = Path(__file__).with_name("runs")
+    vuln_scan = report.get("reporte_vulnerabilidades") or scan_vulnerabilities(repo_root, version=version, runs_dir=runs_dir)
+    vuln_open = vuln_scan.get("abiertas", 0)
+    vuln_mitigated = vuln_scan.get("mitigadas", 0)
+    vuln_total = vuln_scan.get("total", 4)
+    stage3_state = (
+        "verificado"
+        if (vuln_open == 0 and sec.get("alertas_abiertas", 0) == 0 and sec.get("estado") == "activo")
+        or (vuln_open == 0 and vuln_mitigated == vuln_total)
+        else "atencion" if vuln_scan.get("altas_abiertas", 0) > 0 else "informativo"
+    )
     deployed_version, deployed_commit = desp.get("version_app"), desp.get("commit_desplegado")
     deployment_matches = bool(
         desp.get("estado") == "Succeeded" and desp.get("revision_activa")
@@ -521,22 +535,20 @@ def build_eight_stages(report: dict, devsecops_data: dict) -> list[dict]:
             "bloque": "DevSec",
             "etapa": "Asegurar desde el origen",
             "herramienta": "GHAS · CodeQL · Dependabot",
-            "pregunta": "¿Qué controles SAST, Secret Scanning, Dependabot y SBOM protegen el código?",
-            "estado": "verificado" if sec.get("alertas_abiertas", 0) == 0 and sec.get("estado") == "activo" else "informativo",
+            "pregunta": "¿Qué vulnerabilidades SAST, contenedor, IaC y cadena de suministro están abiertas?",
+            "estado": stage3_state,
             "resumen": (
-                f"CodeQL ({sec.get('alertas_abiertas', 0)} alertas) · Dependabot ({dep_prs_count or 0} PRs)"
-                + (f" · SBOM {sbom['paquetes']} paq." if sbom.get("disponible") else "")
-                if sec.get("estado") == "activo"
-                else f"Dependabot ({dep_prs_count or 0} PRs) · CodeQL ({sec.get('estado', 'en curso')})"
+                f"Reporte SecOps: {vuln_open} abiertas · {vuln_mitigated}/{vuln_total} mitigadas · Dependabot ({dep_prs_count or 0} PRs)"
             ),
-            "descripcion": "Inspecciona análisis SAST (CodeQL), PRs de actualización Dependabot, protección de secretos e inventario SPDX SBOM.",
+            "descripcion": "Audita vulnerabilidades accionables en CI/CD, Dockerfile, Kubernetes AKS y API .NET junto con alertas CodeQL, Dependabot y SBOM.",
             "datos": {
+                "Vulnerabilidades auditadas": f"{vuln_open} abiertas · {vuln_mitigated} mitigadas (de {vuln_total})",
                 "Estado CodeQL": sec.get("estado", "no disponible"),
                 "Alertas SAST abiertas": str(sec.get("alertas_abiertas", 0)),
                 "Dependabot": dep_label,
                 "Secret Scanning": sec_scan.get("estado", "proteccion_push"),
                 "Inventario SBOM": sbom_label,
-                "Alcance": "Versión / Cadena de suministro",
+                "Remediación agéntica": "Conectada con Etapa 8 (SecOps IA)",
             },
             "url": f"{gh['url_repositorio']}/security" if gh.get("url_repositorio") else None,
             "etiqueta_url": "Abrir alertas de seguridad en GitHub",
@@ -687,6 +699,11 @@ class EvaluateEvidence(Executor):
             "criterio": CRITERION,
             "criterios_evaluados": matrix["criterios_evaluados"],
             "cobertura": matrix["cobertura"],
+            "reporte_vulnerabilidades": scan_vulnerabilities(
+                Path(__file__).resolve().parent.parent,
+                version=evidence.identity["version"],
+                runs_dir=evidence.directory.parent,
+            ),
             "modo": "solo evidencia" if investigation["estado"] == "SOLO_EVIDENCIA" else "agente",
             "ejecucion": evidence.identity,
             "diagnosticos": evidence.diagnostics,

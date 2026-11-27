@@ -222,9 +222,15 @@ def execute_demo_reset(
         "archivos_disponibles": [],
     }
     if reset_code:
+        from .vulnerabilities import revert_vuln_remediation
         summary["codigo_revertido"] = revert_local_remediation(repo_root, runs_dir, version=None)
+        vuln_rev = revert_vuln_remediation(repo_root, runs_dir, vuln_id=None)["archivos_revertidos"]
+        for path in vuln_rev:
+            if path not in summary["codigo_revertido"]:
+                summary["codigo_revertido"].append(path)
     if reset_github_prs:
-        summary["prs_cerrados"] = close_github_remediation_prs(runs_dir, version=None)
+        from .vulnerabilities import close_vuln_github_prs
+        summary["prs_cerrados"] = close_github_remediation_prs(runs_dir, version=None) + close_vuln_github_prs(runs_dir, vuln_id=None)
     if reset_sandbox:
         summary["sandbox_archivos_limpiados"] = clean_sandbox_data(repo_root)
     if reset_runs:

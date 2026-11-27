@@ -23,6 +23,12 @@ from assessment.evidence import APP, CRITERION, PROJECT, collect, read_cobertura
 from assessment.integrations import audit_repo_governance, parse_boards_criteria
 from assessment.policy import evaluate, evaluate_criteria_matrix, source_tests
 from assessment.powerbi_cloud import _build_executive_pbix, sync_powerbi_cloud
+from assessment.vulnerabilities import (
+    apply_vuln_remediation,
+    generate_vuln_remediation,
+    revert_vuln_remediation,
+    scan_vulnerabilities,
+)
 from assessment.remediation import (
     apply_local_remediation,
     close_github_remediation_prs,
@@ -579,6 +585,39 @@ class DevSecOpsRegression(unittest.TestCase):
                 reverted_list = revert_local_remediation(sandbox_repo, runs_dir, version=ver)
                 self.assertEqual(len(reverted_list), 1)
                 self.assertEqual((sandbox_repo / ver / rel_cs).read_bytes(), orig_bytes)
+
+            # Stage 3 Vulnerability Report -> Stage 8 SecOps Agent Mitigation -> Byte-exact Revert
+            vuln_repo = base / "vuln_repo"
+            (vuln_repo / ".github" / "workflows").mkdir(parents=True)
+            (vuln_repo / "deploy" / "aks").mkdir(parents=True)
+            shutil.copy2(ROOT / ".github" / "workflows" / "devsecops.yml", vuln_repo / ".github" / "workflows" / "devsecops.yml")
+            shutil.copy2(ROOT / "Dockerfile", vuln_repo / "Dockerfile")
+            shutil.copy2(ROOT / "deploy" / "aks" / "deployment.yaml", vuln_repo / "deploy" / "aks" / "deployment.yaml")
+            copy_version(ROOT / "v1", vuln_repo / "v1")
+
+            tracked_files = [
+                ".github/workflows/devsecops.yml",
+                "Dockerfile",
+                "deploy/aks/deployment.yaml",
+                "v1/src/Contratos/Program.cs",
+            ]
+            orig_snapshots = {rel: (vuln_repo / rel).read_bytes() for rel in tracked_files}
+
+            initial_scan = scan_vulnerabilities(vuln_repo, version="v1", runs_dir=runs_dir)
+            self.assertEqual(initial_scan["abiertas"], 4)
+            self.assertEqual(initial_scan["mitigadas"], 0)
+
+            draft_sec = asyncio.run(generate_vuln_remediation(vuln_repo, runs_dir, "SEC-DOCKER-001", version="v1", use_ai=False))
+            self.assertIn("USER $APP_UID", draft_sec["codigo_sugerido"])
+
+            mitigated = apply_vuln_remediation(vuln_repo, runs_dir, "TODAS", version="v1")
+            self.assertEqual(mitigated["reporte_vulnerabilidades"]["abiertas"], 0)
+            self.assertEqual(mitigated["reporte_vulnerabilidades"]["mitigadas"], 4)
+
+            rev_sec = revert_vuln_remediation(vuln_repo, runs_dir, vuln_id="TODAS", version="v1")
+            self.assertEqual(rev_sec["reporte_vulnerabilidades"]["abiertas"], 4)
+            for rel, raw_bytes in orig_snapshots.items():
+                self.assertEqual((vuln_repo / rel).read_bytes(), raw_bytes)
 
 
 if __name__ == "__main__":

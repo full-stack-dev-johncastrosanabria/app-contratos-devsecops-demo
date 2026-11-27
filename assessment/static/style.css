@@ -1702,6 +1702,153 @@ input:disabled {
   text-underline-offset: 3px;
 }
 
+/* Stage 3 Vulnerability Report Table (Responsive Sticky + Container Stacked Cards) */
+.vuln-section,
+.secops-workbench {
+  border-block-start: 1px solid var(--border-subtle);
+  padding-block-start: var(--space-3);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.vuln-head-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.vuln-table-wrap {
+  overflow: auto;
+  max-inline-size: 100%;
+  max-block-size: min(380px, 60vh);
+  container-type: inline-size;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-sheet);
+}
+
+.vuln-table {
+  inline-size: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-xs);
+  --label-2: "Severidad";
+  --label-3: "Ubicación";
+  --label-4: "Estado";
+  --label-5: "Acción";
+}
+
+.vuln-table caption {
+  text-align: start;
+  padding: var(--space-2) var(--space-3);
+  font-weight: 750;
+  color: var(--ink-primary);
+  background-color: var(--surface-tint);
+  border-block-end: 1px solid var(--border-subtle);
+}
+
+.vuln-table thead {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+  background-color: var(--surface-well);
+}
+
+.vuln-table thead th {
+  text-align: start;
+  padding: 8px 10px;
+  font-weight: 750;
+  color: var(--ink-primary);
+  border-block-end: 1px solid var(--border-strong);
+  white-space: nowrap;
+}
+
+.vuln-table tbody th,
+.vuln-table tbody td {
+  text-align: start;
+  vertical-align: middle;
+  padding: 9px 10px;
+  border-block-end: 1px solid var(--border-subtle);
+}
+
+.vuln-table tbody tr:last-child th,
+.vuln-table tbody tr:last-child td {
+  border-block-end: 0;
+}
+
+.vuln-table tbody th {
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  background-color: var(--surface-sheet);
+  font-weight: 600;
+  min-inline-size: 210px;
+}
+
+.vuln-row-title {
+  display: grid;
+  gap: 2px;
+}
+
+.vuln-row-title strong {
+  color: var(--ink-primary);
+}
+
+.vuln-row-title span {
+  color: var(--ink-muted);
+  font-weight: 500;
+}
+
+@container (width < 640px) {
+  .vuln-table,
+  .vuln-table thead,
+  .vuln-table tbody,
+  .vuln-table tr,
+  .vuln-table th,
+  .vuln-table td {
+    display: block;
+  }
+
+  .vuln-table thead {
+    display: none;
+  }
+
+  .vuln-table tbody tr {
+    margin: var(--space-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+
+  .vuln-table tbody th {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 2;
+    background-color: var(--surface-well);
+    min-inline-size: 0;
+  }
+
+  .vuln-table td:nth-child(2)::before { content: var(--label-2) ": "; font-weight: 750; }
+  .vuln-table td:nth-child(3)::before { content: var(--label-3) ": "; font-weight: 750; }
+  .vuln-table td:nth-child(4)::before { content: var(--label-4) ": "; font-weight: 750; }
+  .vuln-table td:nth-child(5)::before { content: var(--label-5) ": "; font-weight: 750; }
+}
+
+.secops-controls-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: var(--space-2);
+  align-items: end;
+}
+
+@media (max-width: 720px) {
+  .secops-controls-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .copyable {
   display: flex;
   align-items: start;

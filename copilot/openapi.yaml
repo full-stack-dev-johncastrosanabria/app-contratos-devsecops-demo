@@ -49,6 +49,27 @@ paths:
       responses:
         "200":
           description: URL directa del reporte publicado en Power BI Service.
+  /api/vulnerabilidades:
+    get:
+      operationId: consultarReporteVulnerabilidadesEtapa3
+      summary: Devuelve el reporte estructurado de vulnerabilidades (CI/CD, Contenedor, AKS IaC y API .NET) de la Etapa 3.
+      responses:
+        "200":
+          description: Reporte de vulnerabilidades abiertas y mitigadas por entrega.
+  /api/vulnerabilidades/remediar:
+    post:
+      operationId: generarRemediacionVulnerabilidadAgenteSecOps
+      summary: Invoca al Agente SecOps en Etapa 8 para analizar una vulnerabilidad de Etapa 3 y proponer el parche de endurecimiento.
+      responses:
+        "200":
+          description: Análisis CWE y parche de mitigación propuesto.
+  /api/vulnerabilidades/aplicar:
+    post:
+      operationId: aplicarMitigacionVulnerabilidadYReauditar
+      summary: Aplica con respaldo reversible la mitigación de seguridad y reaudita instantáneamente la Etapa 3.
+      responses:
+        "200":
+          description: Vulnerabilidad mitigada y Etapa 3 actualizada.
   /api/evaluar:
     post:
       operationId: ejecutarEvaluacionEntrega
