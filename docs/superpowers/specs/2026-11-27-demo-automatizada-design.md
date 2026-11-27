@@ -95,9 +95,9 @@ Uso: `assessment/.venv/bin/python -m demo [--velocidad 1|0.75|1.25] [--paso-a-pa
 
 ### 6.2 Flujo de una corrida
 
-1. **Revisión previa** (§6.7). Aborta con un mensaje claro si falla un chequeo bloqueante.
-2. **Servidor**: usa `:8050` si ya responde. Si no, lanza `python -m assessment.ui` y lo detiene al salir.
-3. **Reinicio previo**: `POST /api/demo/reiniciar` con `{corridas, sandbox, boards, codigo, prs}` todos en `true`. Va por HTTP para que el estado en memoria del servidor quede coherente.
+1. **Servidor**: usa `:8050` si ya responde. Si no, lanza `python -m assessment.ui` y lo detiene al salir.
+2. **Reinicio previo**: `POST /api/demo/reiniciar` con `{corridas, sandbox, boards, codigo, prs}` todos en `true`. Va por HTTP para que el estado en memoria del servidor quede coherente. Va antes de la revisión para que una corrida cortada a medias, por ejemplo con el parche aplicado, se revierta sola.
+3. **Revisión previa** (§6.7), ya con el estado reiniciado. Aborta con un mensaje claro si falla un chequeo bloqueante.
 4. **Calentamiento**: `GET /api/vulnerabilidades` deja en caché el escaneo de Trivy del servidor, para que la Etapa 3 cargue al instante.
 5. **Navegador**: `chromium.launch(channel="chrome", headless=False)`.
    - Argumentos de lanzamiento: `--kiosk` (pantalla completa, sin barra ni pestañas; el constructor verifica en macOS si funciona mejor con `--start-fullscreen`), `--autoplay-policy=no-user-gesture-required` e `ignore_default_args=["--enable-automation"]`.
