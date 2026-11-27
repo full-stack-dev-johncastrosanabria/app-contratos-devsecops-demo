@@ -249,7 +249,6 @@ const FIELD_LABELS = {
 };
 
 const cards = new Map();
-const stationButtons = new Map();
 const reportsByVersion = new Map();
 const provenanceByVersion = new Map();
 
@@ -258,10 +257,9 @@ let activeController = null;
 let filterDiffOnly = false;
 let inspectedStage = null;
 let inspectedVersion = null;
-let inspectorOrigin = null;
+let activeDossier = null;
 let lastSandboxAttempt = null;
 let sandboxBusy = false;
-let corridorPrimed = false;
 let escArmedUntil = 0;
 const SHORTCUTS_KEY = "nextgen.atajos";
 let shortcutsEnabled = true;
@@ -273,15 +271,18 @@ try {
 let helpOrigin = null;
 let helpReturnY = 0;
 
-const corridorMap = document.querySelector("#corridor-map");
+const ledger = document.querySelector("#ledger");
+const ledgerHead = document.querySelector("#ledger-head");
+const ledgerFoot = document.querySelector("#ledger-foot");
+const ledgerBodies = { DevSec: document.querySelector("#ledger-devsec"), CloudOps: document.querySelector("#ledger-cloudops") };
+const ledgerHubCell = document.querySelector("#ledger-hub-cell");
+const ledgerHeadline = document.querySelector("#ledger-headline");
+const ledgerFilterNote = document.querySelector("#ledger-filter-note");
+const dossierTabs = document.querySelector("#dossier-tabs");
 const runBtnLabel = runBtn.querySelector("span");
 const hubLine = document.querySelector("#hub-line");
 const hubLineDefault = hubLine.textContent;
 const announcer = document.querySelector("#announcer");
-const sharedStagesBand = document.querySelector("#shared-stages");
-const verdictStrip = document.querySelector("#verdict-strip");
-const matrixClose = document.querySelector("#matrix-close");
-const corridorFilterNote = document.querySelector("#corridor-filter-note");
 const shortcutsToggle = document.querySelector("#shortcuts-toggle");
 const sandboxToggle = document.querySelector("#sandbox-toggle");
 const sandboxBar = document.querySelector(".sandbox-bar");
@@ -322,27 +323,31 @@ function describeFetchError(err, fallback) {
 }
 
 function setRunning(running) {
-  corridorMap.dataset.running = String(running);
+  ledger.dataset.running = String(running);
   runBtn.dataset.busy = String(running);
   runBtnLabel.textContent = running ? "Evaluando…" : "Ejecutar evaluación";
   for (const btn of document.querySelectorAll("[data-eval], [data-launch]")) btn.disabled = running;
   if (!running) {
     clearInterval(markRunningVersion.timer);
-    delete corridorMap.dataset.runningVersion;
+    delete ledger.dataset.runningVersion;
     hubLine.textContent = hubLineDefault;
   }
 }
 
-// The corridor names the delivery in flight: its pips pulse and the hub states it.
+// The ledger names the delivery in flight: its column head ticks and the interchange states it.
 function markRunningVersion(version, index, total) {
-  corridorMap.dataset.runningVersion = version;
+  ledger.dataset.runningVersion = version;
   const started = Date.now();
   const chip = cards.get(version)?.querySelector(".provenance-chip");
   const tick = () => {
     const secs = Math.floor((Date.now() - started) / 1000);
     const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
     hubLine.textContent = `Evaluando ${version} · ${index + 1} de ${total} · ${clock}`;
-    if (chip && cards.get(version).dataset.verdict === "busy") chip.textContent = `Ejecutando ahora · ${clock} · compilación, xUnit${form.elements.modo.value === "agente" ? " y agentes" : ""}`;
+    if (chip && cards.get(version).dataset.verdict === "busy") {
+      chip.textContent = `Ejecutando ahora · ${clock} · compilación, xUnit${form.elements.modo.value === "agente" ? " y agentes" : ""}`;
+      const head = ledgerHead.querySelector(`[data-ver="${version}"] .ver-prov`);
+      if (head) head.textContent = `Ejecutando ahora · ${clock}`;
+    }
   };
   clearInterval(markRunningVersion.timer);
   tick();
@@ -494,122 +499,323 @@ function createSummary(labelText) {
   return summary;
 }
 
-// Build initial 8-station Transit Corridor once (no repeated DOM teardown)
-function initTransitCorridor() {
-  const devsecList = document.querySelector("#loop-devsec");
-  const cloudList = document.querySelector("#loop-cloudops");
-  devsecList.replaceChildren();
-  cloudList.replaceChildren();
-
-  for (const meta of STAGE_CATALOG) {
-    const li = element("li", null, "station-item");
-    const btn = element("button", null, "station-btn");
-    btn.type = "button";
-    btn.dataset.stage = String(meta.numero);
-    btn.dataset.state = "informativo";
-    btn.setAttribute("aria-expanded", "false");
-    btn.setAttribute("aria-controls", "stage-inspector");
-
-    const top = element("span", null, "station-top");
-    const titleWrap = element("span", null, "station-title-wrap");
-    const num = element("span", String(meta.numero), "station-num");
-    num.setAttribute("aria-hidden", "true");
-    titleWrap.append(num, element("span", meta.etapa));
-
-    const srState = element("span", " (sin datos todavía)", "sr-only");
-    srState.dataset.role = "sr-state";
-    top.append(titleWrap, srState);
-
-    const bottom = element("span", null, "station-bottom");
-    const tool = element("span", meta.herramienta, "station-tool");
-    const pips = element("span", null, "station-ver-pips");
-    pips.setAttribute("aria-hidden", "true");
-    for (const ver of versions) {
-      const slot = element("span", null, "ver-slot");
-      const pip = element("span", null, "ver-pip");
-      pip.dataset.ver = ver;
-      pip.title = `${ver}: sin datos todavía`;
-      slot.append(element("span", ver, "ver-num"), pip);
-      pips.append(slot);
-    }
-    bottom.append(tool, pips);
-
-    btn.append(top, bottom);
-    btn.addEventListener("click", () => {
-      if (inspectedStage === meta.numero && !stageInspector.hidden) {
-        closeStageInspector();
-      } else {
-        openStageInspector(meta.numero, null, btn);
-      }
-    });
-
-    li.append(btn);
-    stationButtons.set(meta.numero, btn);
-    (meta.bloque === "DevSec" ? devsecList : cloudList).append(li);
-  }
-  renderLegend();
-}
-
 function setPip(pip, state) {
   pip.dataset.state = state;
   pip.replaceChildren(svgIcon(PIP_GLYPHS[state] || "dash", 10));
 }
 
-function renderLegend() {
-  const legend = document.querySelector("#corridor-legend");
-  legend.replaceChildren();
-  for (const state of ["verificado", "incumplido", "pendiente", "atencion", "informativo"]) {
-    const item = element("li", null, "legend-item");
-    const pip = element("span", null, "ver-pip");
-    pip.setAttribute("aria-hidden", "true");
-    setPip(pip, state);
-    item.append(pip, element("span", STATE_LABELS[state]));
-    legend.append(item);
-  }
-  const empty = element("li", null, "legend-item");
-  const hollow = element("span", null, "ver-pip");
-  hollow.setAttribute("aria-hidden", "true");
-  empty.append(hollow, element("span", "Sin datos"));
-  legend.append(empty);
+const LINES = {
+  DevSec: ["DS", "Línea DevSec · Código y evidencia"],
+  CloudOps: ["CO", "Línea CloudOps · Nube y gobierno"],
+};
+const joinList = (list) => list.join(", ").replace(/, ([^,]*)$/, " y $1");
+
+function initLedger() {
   for (const pip of document.querySelectorAll("#help-states .ver-pip[data-state]")) setPip(pip, pip.dataset.state);
+  renderLedger();
 }
 
-function updateTransitCorridor() {
-  for (const meta of STAGE_CATALOG) {
-    const btn = stationButtons.get(meta.numero);
-    if (!btn) continue;
+// The cell a stage and delivery live in; a stage shared by every delivery has one cell for all.
+function ledgerCell(stage, ver) {
+  return ledger.querySelector(`.ledger-cell-btn[data-stage="${stage}"][data-ver="${ver}"]`)
+    || ledger.querySelector(`.ledger-cell-btn[data-stage="${stage}"]`);
+}
 
-    let worstState = "informativo";
-    const perVersion = [];
-    for (const ver of versions) {
-      const rep = reportsByVersion.get(ver);
-      const st = rep?.etapas_devsecops?.find((x) => x.numero === meta.numero)?.estado || "informativo";
-      const pip = btn.querySelector(`.ver-pip[data-ver="${ver}"]`);
-      if (pip) {
-        if (rep) setPip(pip, st);
-        pip.title = `${ver}: ${rep ? STATE_LABELS[st] || st : "sin datos todavía"}`;
-      }
-      if (rep) perVersion.push([ver, st]);
-      if ((STATE_RANK[st] || 0) > (STATE_RANK[worstState] || 0)) {
-        worstState = st;
-      }
-    }
-
-    if (corridorPrimed && btn.dataset.state !== worstState) replayClass(btn, "is-updated", 700);
-    btn.dataset.state = worstState;
-    btn.setAttribute("aria-expanded", String(!stageInspector.hidden && inspectedStage === meta.numero));
-    const srState = btn.querySelector('[data-role="sr-state"]');
-    if (srState) {
-      const distinct = new Set(perVersion.map(([, st]) => st));
-      srState.textContent = !perVersion.length
-        ? " (sin datos todavía)"
-        : distinct.size === 1
-          ? ` (${STATE_LABELS[perVersion[0][1]].toLowerCase()} en ${perVersion.length === 1 ? perVersion[0][0] : "todas las entregas"})`
-          : ` (${perVersion.map(([ver, st]) => `${ver} ${STATE_LABELS[st].toLowerCase()}`).join(", ")})`;
-    }
-
+function markInspecting() {
+  for (const btn of ledger.querySelectorAll(".ledger-cell-btn")) {
+    const on = !stageInspector.hidden && Number(btn.dataset.stage) === inspectedStage
+      && (btn.dataset.ver === "todas" || btn.dataset.ver === inspectedVersion);
+    btn.classList.toggle("is-inspecting", on);
+    btn.setAttribute("aria-expanded", String(on));
   }
 }
+
+function cellButton(meta, stage, ver, shown) {
+  const btn = element("button", null, "ledger-cell-btn");
+  btn.type = "button";
+  btn.dataset.stage = String(meta.numero);
+  btn.dataset.ver = ver;
+  btn.setAttribute("aria-controls", "stage-inspector");
+  btn.setAttribute("aria-expanded", "false");
+  if (!stage) {
+    btn.dataset.state = "idle";
+    const busy = cards.get(ver)?.dataset.verdict === "busy";
+    btn.append(element("span", busy ? "Evaluando…" : "Sin datos", "cell-empty"));
+    btn.setAttribute("aria-label", `Etapa ${meta.numero}, ${meta.etapa}, ${ver}: ${busy ? "evaluando" : "sin datos todavía"}. Ver qué revisa`);
+  } else {
+    btn.dataset.state = stage.estado;
+    const note = stageNote(stage);
+    if (note && stage.estado === "informativo") btn.dataset.flagged = "true";
+    if (ver !== "todas" && cards.get(ver)?.dataset.stale === "true") btn.dataset.stale = "true";
+    const head = element("span", null, "cell-state");
+    head.append(svgIcon(stateToIconKind(stage.estado), 13), element("span", stageStateLabel(stage)));
+    if (ver === "todas") head.append(element("span", `Igual en ${joinList(shown)}`, "cell-shared-tag"));
+    btn.append(head, termText("span", stripState(stage.resumen), "cell-summary"));
+    if (note) {
+      const noteEl = element("span", null, "cell-note");
+      noteEl.append(svgIcon("bang", 12), element("span", note));
+      btn.append(noteEl);
+    }
+  }
+  btn.addEventListener("click", () => {
+    const target = ver === "todas" ? null : ver;
+    const same = !stageInspector.hidden && inspectedStage === meta.numero && (target === null || inspectedVersion === target);
+    if (same) closeStageInspector();
+    else openStageInspector(meta.numero, target);
+  });
+  return btn;
+}
+
+// Stage × delivery ledger: the transit line runs down the first column, one tab stop per cell.
+function renderLedger() {
+  const focused = ledger.contains(document.activeElement) ? document.activeElement : null;
+  const shown = versions.filter((v) => !cards.get(v).hidden);
+  const finished = finishedVersions();
+  // A stage collapses into one cell only when every delivery on screen has a result and they agree.
+  const shared = finished.length === shown.length ? computeSharedStages(finished) : new Set();
+  const span = shown.length + 1;
+  ledgerHubCell.colSpan = span;
+  ledger.dataset.cols = String(shown.length);
+
+  const headRow = element("tr", null, "ledger-head-row");
+  headRow.setAttribute("role", "row");
+  const corner = element("th", "Etapa", "ledger-corner");
+  corner.scope = "col";
+  corner.setAttribute("role", "columnheader");
+  headRow.append(corner);
+  for (const v of shown) {
+    const card = cards.get(v);
+    const report = reportsByVersion.get(v);
+    const th = element("th", null, "ledger-ver");
+    th.scope = "col";
+    th.setAttribute("role", "columnheader");
+    th.dataset.ver = v;
+    th.dataset.verdict = card.dataset.verdict || "idle";
+    if (card.dataset.stale === "true") th.dataset.stale = "true";
+    const top = element("span", null, "ver-head-row");
+    const cardBadge = card.querySelector(".badge");
+    const badge = element("span", null, "badge");
+    setBadge(badge, cardBadge.dataset.state, cardBadge.textContent);
+    top.append(element("span", v, "ver-id"), badge);
+    th.append(top, element("span", versionRoles[v], "ver-scenario"));
+    if (report) th.append(element("span", decidingReason(report), "ver-why"));
+    const prov = card.querySelector(".provenance-chip").textContent
+      .replace("Corrida previa en caché", "En caché").replace("Ejecución en vivo", "En vivo");
+    th.append(element("span", prov, "ver-prov"));
+    headRow.append(th);
+  }
+  ledgerHead.replaceChildren(headRow);
+
+  let hiddenRows = 0;
+  for (const [bloque, body] of Object.entries(ledgerBodies)) {
+    const [bullet, lineName] = LINES[bloque];
+    const lineRow = element("tr", null, "ledger-line");
+    lineRow.setAttribute("role", "row");
+    lineRow.dataset.line = bloque.toLowerCase();
+    const lineHead = element("th", null, "ledger-line-head");
+    lineHead.scope = "rowgroup";
+    lineHead.setAttribute("role", "rowheader");
+    lineHead.colSpan = span;
+    const bulletEl = element("span", bullet, "line-bullet");
+    bulletEl.setAttribute("aria-hidden", "true");
+    lineHead.append(bulletEl, element("span", lineName));
+    lineRow.append(lineHead);
+    const rows = [lineRow];
+    for (const meta of STAGE_CATALOG.filter((m) => m.bloque === bloque)) {
+      const perVer = shown.map((v) => [v, reportsByVersion.get(v)?.etapas_devsecops?.find((x) => x.numero === meta.numero)]);
+      if (filterDiffOnly && finished.length && !perVer.some(([, st]) => st && needsReview(st))) {
+        hiddenRows++;
+        continue;
+      }
+      const tr = element("tr", null, "ledger-row");
+      tr.setAttribute("role", "row");
+      tr.dataset.stage = String(meta.numero);
+      const present = perVer.filter(([, st]) => st);
+      const worst = present.reduce((w, [, st]) => ((STATE_RANK[st.estado] ?? 0) > (STATE_RANK[w] ?? 0) ? st.estado : w), "informativo");
+      const th = element("th", null, "ledger-stage");
+      th.scope = "row";
+      th.setAttribute("role", "rowheader");
+      th.dataset.state = present.length ? worst : "idle";
+      const ring = element("span", String(meta.numero), "station-ring");
+      ring.setAttribute("aria-hidden", "true");
+      const label = element("span", null, "stage-label");
+      label.append(
+        element("span", `Etapa ${meta.numero}: `, "sr-only"),
+        element("span", meta.etapa, "stage-name"),
+        termText("span", meta.herramienta, "stage-tool")
+      );
+      th.append(ring, label);
+      tr.append(th);
+      if (shared.has(meta.numero)) {
+        const td = element("td", null, "ledger-cell is-shared");
+        td.setAttribute("role", "cell");
+        td.colSpan = shown.length;
+        td.append(cellButton(meta, perVer[0][1], "todas", shown));
+        tr.append(td);
+      } else {
+        for (const [v, st] of perVer) {
+          const td = element("td", null, "ledger-cell");
+          td.setAttribute("role", "cell");
+          td.dataset.ver = v;
+          td.append(cellButton(meta, st, v, shown));
+          tr.append(td);
+        }
+      }
+      rows.push(tr);
+    }
+    if (rows.length === 1) {
+      const empty = element("tr", null, "ledger-empty-row");
+      empty.setAttribute("role", "row");
+      const td = element("td", "Sin brechas en esta línea.", "stage-filter-empty");
+      td.setAttribute("role", "cell");
+      td.colSpan = span;
+      empty.append(td);
+      rows.push(empty);
+    }
+    body.replaceChildren(...rows);
+  }
+  ledgerFilterNote.hidden = !filterDiffOnly;
+  ledgerFilterNote.textContent = hiddenRows
+    ? `Filtro «Solo brechas»: ${hiddenRows} ${hiddenRows === 1 ? "etapa sin nada que revisar oculta" : "etapas sin nada que revisar ocultas"}. Pulsa D o el botón para verlas.`
+    : "Filtro «Solo brechas»: todas las etapas tienen algo que revisar.";
+
+  renderLedgerFoot(shown);
+  renderLedgerHeadline(shown);
+  markInspecting();
+  renderDossierTabs();
+  if (focused && !document.contains(focused)) {
+    const again = focused.dataset.decision
+      ? ledgerFoot.querySelector(`[data-decision="${focused.dataset.decision}"]`)
+      : ledgerCell(focused.dataset.stage, focused.dataset.ver);
+    again?.focus({ preventScroll: true });
+  }
+}
+
+// The ledger ends on the human decision each delivery still needs.
+function renderLedgerFoot(shown) {
+  const row = element("tr", null, "ledger-foot-row");
+  row.setAttribute("role", "row");
+  const th = element("th", null, "ledger-stage ledger-foot-head");
+  th.scope = "row";
+  th.setAttribute("role", "rowheader");
+  const label = element("span", null, "stage-label");
+  label.append(element("span", "Decisión humana", "stage-name"), element("span", "Azure Boards", "stage-tool"));
+  th.append(label);
+  row.append(th);
+  for (const v of shown) {
+    const report = reportsByVersion.get(v);
+    const action = report?.accion_propuesta;
+    let text = "Sin corrida todavía";
+    let tone = "idle";
+    if (report && !action) {
+      text = "Sin acción correctiva";
+      tone = "pass";
+    } else if (action?.estado === "PENDIENTE_APROBACION") {
+      text = "Acción pendiente";
+      tone = "attention";
+    } else if (action) {
+      const ref = action.boards_resultado?.referencia;
+      text = `${ENUM_TEXT[action.estado] || humanize(action.estado)}${ref ? ` · ${ref}` : ""}`;
+      tone = action.estado === "DESCARTADA" ? "idle" : "pass";
+    }
+    const td = element("td", null, "ledger-decision");
+    td.setAttribute("role", "cell");
+    td.dataset.ver = v;
+    td.dataset.tone = tone;
+    const btn = element("button", null, "ledger-decision-btn");
+    btn.type = "button";
+    btn.dataset.decision = v;
+    btn.append(
+      element("span", text, "decision-state"),
+      element("span", tone === "attention" ? `Decidir en el expediente de ${v}` : `Abrir expediente de ${v}`, "decision-go")
+    );
+    btn.addEventListener("click", () => selectDossier(v, { focus: tone === "attention" ? "decision" : "panel", scroll: true }));
+    td.append(btn);
+    row.append(td);
+  }
+  ledgerFoot.replaceChildren(row);
+}
+
+function renderLedgerHeadline(shown) {
+  const touched = shown.filter((v) => cards.get(v).querySelector(".badge").textContent !== "Sin ejecutar");
+  if (!touched.length) {
+    ledgerHeadline.textContent = "Sin corridas todavía: pulsa «Ejecutar evaluación» para llenar la matriz.";
+    return;
+  }
+  const finishedVers = touched.filter((v) => ["pass", "fail", "unknown"].includes(cards.get(v).dataset.verdict));
+  if (!finishedVers.length) {
+    ledgerHeadline.textContent = "Evaluación en curso: cada columna se completa al terminar su corrida.";
+    return;
+  }
+  const gaps = finishedVers.filter((v) => reportsByVersion.get(v).veredicto !== "VERIFICADO").length;
+  const pending = finishedVers.filter((v) => reportsByVersion.get(v).accion_propuesta?.estado === "PENDIENTE_APROBACION").length;
+  const liveCount = finishedVers.filter((v) => provenanceByVersion.get(v)?.isLive).length;
+  const provenance = liveCount === finishedVers.length
+    ? "resultados en vivo"
+    : liveCount === 0 ? "corridas en caché (0 tokens)" : "resultados en vivo y en caché";
+  const unfinished = touched.length - finishedVers.length;
+  ledgerHeadline.textContent = `Dictamen REN-001: ${gaps} de ${finishedVers.length} ${finishedVers.length === 1 ? "entrega" : "entregas"} con brecha${pending ? ` · ${pending} ${pending === 1 ? "acción espera" : "acciones esperan"} decisión humana` : " · ninguna decisión pendiente"}${unfinished ? ` · ${unfinished} sin dictamen` : ""} · ${provenance}`;
+}
+
+// One delivery's evidence at a time; the ledger above keeps the comparison.
+function renderDossierTabs() {
+  const shown = versions.filter((v) => !cards.get(v).hidden);
+  if (!shown.includes(activeDossier)) activeDossier = shown[0] || null;
+  const hadFocus = dossierTabs.contains(document.activeElement);
+  dossierTabs.replaceChildren();
+  for (const v of shown) {
+    const card = cards.get(v);
+    const selected = v === activeDossier;
+    const tab = element("button", null, "dossier-tab");
+    tab.type = "button";
+    tab.id = `tab-${v}`;
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-controls", card.id);
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    tab.dataset.ver = v;
+    tab.dataset.verdict = card.dataset.verdict || "idle";
+    tab.setAttribute("aria-label", `${v}: ${card.querySelector(".badge").textContent}`);
+    tab.append(
+      element("span", v, "tab-ver"),
+      svgIcon(stateToIconKind(card.dataset.verdict || "idle"), 13),
+      element("span", card.querySelector(".badge").textContent, "tab-state")
+    );
+    tab.addEventListener("click", () => selectDossier(v));
+    dossierTabs.append(tab);
+  }
+  for (const [v, card] of cards) card.dataset.active = String(v === activeDossier);
+  if (hadFocus) dossierTabs.querySelector('[aria-selected="true"]')?.focus({ preventScroll: true });
+}
+
+function selectDossier(v, { focus = "tab", scroll = false } = {}) {
+  // A Boards send in its 5 s grace keeps its Deshacer on screen: no switching away until it settles.
+  const graceVer = versions.find((x) => cards.get(x).dataset.grace === "true");
+  if (graceVer && graceVer !== v) {
+    announce(`Hay un envío de ${graceVer} en cuenta atrás: espera a que termine o pulsa «Deshacer» antes de cambiar de expediente.`);
+    cards.get(graceVer).querySelector(".gov-grace-undo")?.focus();
+    return;
+  }
+  activeDossier = v;
+  renderDossierTabs();
+  const card = cards.get(v);
+  if (scroll) card.scrollIntoView({ behavior: reducedMotion.matches ? "auto" : "smooth", block: "start" });
+  const approve = card.querySelector(".governance .btn-approve");
+  if (focus === "decision" && approve && approve.offsetParent) approve.focus({ preventScroll: true });
+  else if (focus === "panel") card.querySelector(".card-version-title").focus({ preventScroll: true });
+  else dossierTabs.querySelector(`#tab-${v}`)?.focus({ preventScroll: true });
+}
+
+dossierTabs.addEventListener("keydown", (event) => {
+  const tabs = [...dossierTabs.querySelectorAll('[role="tab"]')];
+  const i = tabs.indexOf(document.activeElement);
+  if (i < 0) return;
+  const next = { ArrowRight: tabs[(i + 1) % tabs.length], ArrowLeft: tabs[(i - 1 + tabs.length) % tabs.length], Home: tabs[0], End: tabs[tabs.length - 1] }[event.key];
+  if (!next) return;
+  event.preventDefault();
+  event.stopPropagation();
+  selectDossier(next.dataset.ver);
+});
 
 function pickBestVersionForStage(stageNumber, explicitVersion) {
   if (explicitVersion && reportsByVersion.has(explicitVersion)) return explicitVersion;
@@ -678,16 +884,6 @@ function openStageInspector(stageNumber, focusVersion, origin = null, { refresh 
   const previousStage = inspectedStage;
   const previousVersion = inspectedVersion;
   const tabHadFocus = inspectorVersionTabs.contains(document.activeElement);
-  if (origin) {
-    inspectorOrigin?.classList.remove("is-inspecting");
-    inspectorOrigin = origin;
-    // Opened from the matrix: dock as a bottom sheet so the row stays in view. From the corridor: inline.
-    stageInspector.dataset.docked = String(Boolean(origin.closest(".results")));
-    placeInspector();
-  } else if (!wasOpen) {
-    stageInspector.dataset.docked = "false";
-    placeInspector();
-  }
   inspectedStage = baseMeta.numero;
   inspectedVersion = pickBestVersionForStage(baseMeta.numero, focusVersion);
 
@@ -696,8 +892,6 @@ function openStageInspector(stageNumber, focusVersion, origin = null, { refresh 
   const merged = { ...baseMeta, ...liveStage, etapa: baseMeta.etapa };
 
   stageInspectorTitle.textContent = `Etapa ${merged.numero}. ${merged.etapa}`;
-  // The row that opened a docked sheet stays visibly selected.
-  inspectorOrigin?.classList.toggle("is-inspecting", stageInspector.dataset.docked === "true");
   const stateLabel = merged.estado ? stageStateLabel(merged) : "Referencia de etapa";
   if (wasOpen && !refresh) {
     announce(`${inspectorWrapNote}Etapa ${merged.numero}, ${merged.etapa}, ${inspectedVersion}: ${stateLabel}.`);
@@ -730,7 +924,7 @@ function openStageInspector(stageNumber, focusVersion, origin = null, { refresh 
   );
   const note = stageNote(merged);
   if (note) {
-    const noteEl = element("p", null, "stage-note");
+    const noteEl = element("p", null, "cell-note");
     noteEl.append(svgIcon("bang", 12), element("span", note));
     answer.append(noteEl);
   }
@@ -806,7 +1000,8 @@ function openStageInspector(stageNumber, focusVersion, origin = null, { refresh 
   if (actions.childElementCount) stageInspectorBody.append(actions);
 
   stageInspector.hidden = false;
-  updateTransitCorridor();
+  // The cell under the sheet stays visibly selected.
+  markInspecting();
 
   // Continuity: stepping between stations slides the detail in the travel direction.
   if (wasOpen && (previousStage !== inspectedStage || previousVersion !== inspectedVersion)) {
@@ -818,34 +1013,17 @@ function openStageInspector(stageNumber, focusVersion, origin = null, { refresh 
   if (refresh) return;
   syncHash();
 
-  if (stageInspector.dataset.docked === "true") {
-    const sheetTop = window.innerHeight - stageInspector.getBoundingClientRect().height;
-    const row = inspectorOrigin?.getBoundingClientRect();
-    if (row && (row.bottom > sheetTop - 8 || row.top < 0)) {
-      window.scrollBy({ top: row.top - Math.max(16, (sheetTop - row.height) / 2), behavior: reducedMotion.matches ? "auto" : "smooth" });
-    }
-  } else {
-    const box = stageInspector.getBoundingClientRect();
-    if (box.top < 0 || box.top > window.innerHeight * 0.55) {
-    // Keep the selected station on screen when the map and the inspector heading fit together.
-    const mapTop = corridorMap.getBoundingClientRect().top;
-    const fitsTogether = box.top - mapTop + 180 < window.innerHeight;
-    (fitsTogether ? corridorMap : stageInspector).scrollIntoView({ behavior: reducedMotion.matches ? "auto" : "smooth", block: "start" });
-    }
+  // The sheet covers the bottom of the page: bring the inspected row above it.
+  const sheetTop = window.innerHeight - stageInspector.getBoundingClientRect().height;
+  const row = ledgerCell(inspectedStage, inspectedVersion)?.getBoundingClientRect();
+  if (row && (row.bottom > sheetTop - 8 || row.top < 0)) {
+    window.scrollBy({ top: row.top - Math.max(16, (sheetTop - row.height) / 2), behavior: reducedMotion.matches ? "auto" : "smooth" });
   }
   if (tabHadFocus) {
     inspectorVersionTabs.querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
   } else if (!stageInspector.contains(document.activeElement)) {
     stageInspector.focus({ preventScroll: true });
   }
-}
-
-// Docked: the sheet follows the matrix in the DOM so Tab order matches what is on screen.
-function placeInspector() {
-  const docked = stageInspector.dataset.docked === "true";
-  const home = docked ? document.querySelector(".results") : corridorMap.parentElement;
-  if (docked && stageInspector.parentElement !== home) home.append(stageInspector);
-  if (!docked && stageInspector.previousElementSibling !== corridorMap) corridorMap.after(stageInspector);
 }
 
 // #etapa=4&version=v2&filtro=brechas makes a view shareable in a review thread.
@@ -874,19 +1052,10 @@ function closeStageInspector() {
   const prevStage = inspectedStage;
   stageInspector.hidden = true;
   inspectedStage = null;
-  updateTransitCorridor();
-  // After stepping with ←/→ the visitor is "at" the current station, not the first one.
-  if (inspectorOrigin?.classList.contains("station-btn")) inspectorOrigin = stationButtons.get(prevStage);
-  const returnTo = inspectorOrigin && document.contains(inspectorOrigin)
-    ? inspectorOrigin
-    : stationButtons.get(prevStage);
-  inspectorOrigin?.classList.remove("is-inspecting");
-  inspectorOrigin = null;
-  stageInspector.dataset.docked = "false";
-  placeInspector();
+  markInspecting();
   syncHash();
-  // Returning focus scrolls back to where the visitor came from (a card row or a station).
-  returnTo?.focus();
+  // After stepping with ←/→ the visitor is "at" the last inspected cell, not where they started.
+  ledgerCell(prevStage, inspectedVersion)?.focus();
 }
 
 let inspectorWrapNote = "";
@@ -1136,12 +1305,13 @@ for (const version of versions) {
   const card = document.querySelector("#version-card").content.firstElementChild.cloneNode(true);
   const titleId = `card-title-${version}`;
   card.dataset.version = version;
+  card.id = `card-${version}`;
+  card.setAttribute("role", "tabpanel");
   card.setAttribute("aria-labelledby", titleId);
   const h3 = card.querySelector(".card-version-title");
   h3.id = titleId;
-  h3.textContent = `Versión ${version.slice(1)}`;
+  h3.textContent = `Expediente de ${version}`;
   h3.tabIndex = -1;
-  card.querySelector(".version-role").textContent = versionRoles[version];
   renderCardQuickActions(card, version);
   cards.set(version, card);
   results.append(card);
@@ -1160,7 +1330,14 @@ function renderCardQuickActions(card, version) {
   evalSingleBtn.type = "button";
   evalSingleBtn.dataset.eval = version;
   evalSingleBtn.addEventListener("click", () => {
-    if (activeController || !confirmPaidRun(evalSingleBtn, 1)) return;
+    if (activeController) return;
+    const previous = provenanceByVersion.get(version);
+    if (previous && form.elements.modo.value !== "agente" && evalSingleBtn.dataset.armed !== "true") {
+      arm(evalSingleBtn, `¿Reemplazar la corrida de ${version}? Pulsa otra vez`);
+      announce(`Volver a evaluar ${version} reemplaza su corrida guardada (${previous.label}). Pulsa otra vez para confirmar.`);
+      return;
+    }
+    if (!confirmPaidRun(evalSingleBtn, 1)) return;
     executeAssessment([version], form.elements.modo.value, { preserveVisible: true });
   });
 
@@ -1205,7 +1382,6 @@ function resetCardBands(card, state, label, reasonText, provenanceText = "Pendie
   cardAlert.replaceChildren();
 
   card.querySelector(".card-proof-band").replaceChildren();
-  card.querySelector(".stages").replaceChildren();
   card.querySelector(".evidence").replaceChildren();
   card.querySelector(".governance").replaceChildren();
   card.querySelector(".downloads").replaceChildren();
@@ -1292,32 +1468,6 @@ function renderDeterministicProof(card, report) {
   }
 }
 
-function stageRowButton(s, version) {
-  const btn = element("button", null, "stage-row-btn");
-  btn.type = "button";
-  btn.dataset.state = s.estado;
-  btn.dataset.stage = String(s.numero);
-
-  const head = element("div", null, "stage-head");
-  const left = element("span", null, "summary-label");
-  left.append(
-    svgIcon(stateToIconKind(s.estado), 13),
-    element("span", `${s.numero}. ${stageName(s.numero, s.etapa)}`)
-  );
-  const note = stageNote(s);
-  const tag = element("span", stageStateLabel(s), "stage-state-tag");
-  if (note && s.estado === "informativo") btn.dataset.flagged = "true";
-  head.append(left, tag);
-  btn.append(head, termText("span", stripState(s.resumen), "stage-desc"));
-  if (note) {
-    const noteEl = element("span", null, "stage-note");
-    noteEl.append(svgIcon("bang", 12), element("span", note));
-    btn.append(noteEl);
-  }
-  btn.addEventListener("click", () => openStageInspector(s.numero, version, btn));
-  return btn;
-}
-
 // One label and one identity per stage result, shared by matrix rows, the shared band and the inspector.
 function stageStateLabel(s) {
   const base = STATE_LABELS[s.estado] || s.estado;
@@ -1329,81 +1479,6 @@ const stageSignature = (s) => `${s.estado}|${s.resumen}|${JSON.stringify(s.datos
 const isGapState = (estado) => ["incumplido", "atencion", "pendiente"].includes(estado);
 // "Solo brechas" keeps what someone must look at: gaps plus informative stages that carry a warning.
 const needsReview = (s) => isGapState(s.estado) || (s.estado === "informativo" && Boolean(stageNote(s)));
-
-function renderStages(container, stages, version, shared = new Set()) {
-  container.replaceChildren();
-  if (!stages || !stages.length) return;
-
-  // Stages identical in every compared delivery live once in the shared band above the cards.
-  const own = stages.filter((s) => !shared.has(s.numero));
-  const gaps = own.filter((s) => isGapState(s.estado));
-  const verified = own.filter((s) => s.estado === "verificado");
-  const informative = own.filter((s) => !isGapState(s.estado) && s.estado !== "verificado");
-  const rowStages = filterDiffOnly
-    ? own.filter(needsReview).sort((a, b) => a.numero - b.numero)
-    : [...gaps, ...informative].sort((a, b) => a.numero - b.numero);
-
-  const parts = [];
-  for (const [estado, one, many] of [
-    ["incumplido", "incumplida", "incumplidas"],
-    ["pendiente", "sin confirmar", "sin confirmar"],
-    ["atencion", "con atención requerida", "con atención requerida"],
-  ]) {
-    const n = gaps.filter((s) => s.estado === estado).length;
-    if (n) parts.push(`${n} ${n === 1 ? one : many}`);
-  }
-  if (verified.length) parts.push(`${verified.length} ${verified.length === 1 ? "verificada" : "verificadas"}`);
-  if (informative.length) parts.push(`${informative.length} ${informative.length === 1 ? "informativa" : "informativas"}`);
-  if (shared.size) parts.push(`${shared.size} comunes en la banda superior`);
-
-  const details = document.createElement("details");
-  details.open = filterDiffOnly || gaps.length > 0 || own.length <= 3;
-  const hiddenByFilter = filterDiffOnly ? own.length - rowStages.length : 0;
-  const summaryText = `${stages.length} etapas · ${parts.join(" · ")}${filterDiffOnly ? ` · filtro «Solo brechas»: ${hiddenByFilter} ${hiddenByFilter === 1 ? "oculta" : "ocultas"}` : ""}`;
-  details.append(createSummary(summaryText));
-
-  const body = element("div", null, "detail-content");
-  if (!rowStages.length) {
-    body.append(element(
-      "p",
-      shared.size
-        ? "Sin brechas propias de esta entrega. Las etapas comunes se muestran una sola vez sobre la matriz."
-        : "Sin brechas en esta entrega: ninguna etapa está incumplida ni requiere atención.",
-      "stage-filter-empty"
-    ));
-  } else {
-    const list = element("ol", null, "stage-list");
-    for (const s of rowStages) {
-      const li = document.createElement("li");
-      li.append(stageRowButton(s, version));
-      list.append(li);
-    }
-    body.append(list);
-  }
-
-  if (!filterDiffOnly && verified.length) {
-    const strip = element("div", null, "stage-pass-strip");
-    const label = element("p", null, "stage-pass-label");
-    label.append(svgIcon("pass", 13), element("span", `Etapas verificadas (${verified.length})`));
-    const chips = element("ul", null, "stage-pass-chips");
-    for (const s of verified) {
-      const li = document.createElement("li");
-      const chip = element("button", null, "stage-chip");
-      chip.type = "button";
-      chip.dataset.stage = String(s.numero);
-      chip.setAttribute("aria-label", `Etapa ${s.numero}, ${stageName(s.numero, s.etapa)}: verificada. Abrir en el inspector`);
-      chip.append(element("span", `${s.numero} · ${stageName(s.numero, s.etapa)}`));
-      chip.addEventListener("click", () => openStageInspector(s.numero, version, chip));
-      li.append(chip);
-      chips.append(li);
-    }
-    strip.append(label, chips);
-    body.append(strip);
-  }
-
-  details.append(body);
-  container.append(details);
-}
 
 // Only cards that are visible and hold a finished verdict take part in the comparison.
 function finishedVersions() {
@@ -1427,48 +1502,8 @@ function computeSharedStages(vers) {
   return shared;
 }
 
-function renderSharedStages(vers, shared) {
-  sharedStagesBand.replaceChildren();
-  const sample = vers.length ? reportsByVersion.get(vers[0]).etapas_devsecops || [] : [];
-  const rows = sample
-    .filter((s) => shared.has(s.numero) && (!filterDiffOnly || needsReview(s)))
-    .sort((a, b) => a.numero - b.numero);
-  sharedStagesBand.hidden = shared.size === 0;
-  if (!shared.size) return;
-
-  const head = element("div", null, "shared-stages-head");
-  head.append(
-    element("h3", vers.length === 3 ? "Comunes a las tres entregas" : `Comunes a ${vers.join(" y ")}`),
-    element("p", "Mismo historial, repositorio, recurso y ambiente cloud: el resultado no cambia entre entregas.", "shared-stages-sub")
-  );
-  sharedStagesBand.append(head);
-  const hiddenShared = shared.size - rows.length;
-  if (filterDiffOnly && hiddenShared) {
-    head.append(element("p", `Filtro «Solo brechas»: ${hiddenShared} ${hiddenShared === 1 ? "etapa común sin brecha oculta" : "etapas comunes sin brecha ocultas"}.`, "filter-note"));
-  }
-
-  if (!rows.length) {
-    sharedStagesBand.append(element("p", "Ninguna etapa común tiene brechas.", "stage-filter-empty"));
-    return;
-  }
-  const list = element("ol", null, "shared-stage-list");
-  list.dataset.count = String(rows.length);
-  for (const s of rows) {
-    const li = document.createElement("li");
-    li.append(stageRowButton(s, null));
-    list.append(li);
-  }
-  sharedStagesBand.append(list);
-}
-
 function refreshStageViews() {
-  const vers = finishedVersions();
-  const shared = computeSharedStages(vers);
-  for (const v of vers) {
-    renderStages(cards.get(v).querySelector(".stages"), reportsByVersion.get(v).etapas_devsecops, v, shared);
-  }
-  renderSharedStages(vers, shared);
-  renderVerdictStrip();
+  renderLedger();
 }
 
 // Deterministic deciding reason: outcome of the TRX row linked to REN-001, if any.
@@ -1483,84 +1518,6 @@ function decidingReason(report) {
   }
   if (report.veredicto === "EVIDENCIA_INSUFICIENTE") return "Ninguna prueba vinculada a REN-001";
   return humanize(report.justificacion || "").split(". ")[0];
-}
-
-function renderVerdictStrip() {
-  const list = verdictStrip.querySelector("ol");
-  const headline = verdictStrip.querySelector(".verdict-headline");
-  list.replaceChildren();
-  // Every visible delivery that has been touched gets a chip, including "Cancelada" and "No evaluada".
-  const shown = versions.filter((v) => !cards.get(v).hidden && cards.get(v).querySelector(".badge").textContent !== "Sin ejecutar");
-  verdictStrip.hidden = shown.length === 0;
-  if (!shown.length) return;
-
-  let gaps = 0;
-  let pendingActions = 0;
-  for (const v of shown) {
-    const card = cards.get(v);
-    const report = reportsByVersion.get(v);
-    const finished = ["pass", "fail", "unknown"].includes(card.dataset.verdict);
-    if (finished && report.veredicto !== "VERIFICADO") gaps++;
-    if (finished && report.accion_propuesta?.estado === "PENDIENTE_APROBACION") pendingActions++;
-
-    const li = document.createElement("li");
-    const btn = element("button", null, "verdict-chip");
-    btn.type = "button";
-    btn.dataset.state = card.dataset.verdict;
-    const badge = card.querySelector(".badge");
-    const why = element("span", finished ? decidingReason(report) : card.querySelector(".reason").textContent, "verdict-why");
-    btn.append(
-      element("span", v, "verdict-ver"),
-      svgIcon(stateToIconKind(card.dataset.verdict), 14),
-      element("strong", badge.textContent),
-      why
-    );
-    btn.setAttribute("aria-label", `${v}: REN-001 ${badge.textContent.toLowerCase()}. ${why.textContent}. Ir a la tarjeta`);
-    btn.addEventListener("click", () => {
-      card.scrollIntoView({ behavior: reducedMotion.matches ? "auto" : "smooth", block: "start" });
-      card.querySelector(".card-version-title").focus({ preventScroll: true });
-    });
-    li.append(btn);
-    list.append(li);
-  }
-  const finishedVers = shown.filter((v) => ["pass", "fail", "unknown"].includes(cards.get(v).dataset.verdict));
-  const finishedCount = finishedVers.length;
-  const liveCount = finishedVers.filter((v) => provenanceByVersion.get(v)?.isLive).length;
-  const provenance = liveCount === finishedCount
-    ? "resultados en vivo"
-    : liveCount === 0 ? "corridas en caché (0 tokens)" : "resultados en vivo y en caché";
-  headline.textContent = finishedCount
-    ? `Dictamen REN-001: ${gaps} de ${finishedCount} ${finishedCount === 1 ? "entrega" : "entregas"} con brecha${pendingActions ? ` · ${pendingActions} ${pendingActions === 1 ? "acción espera" : "acciones esperan"} revisión humana` : ""}${shown.length > finishedCount ? ` · ${shown.length - finishedCount} sin dictamen` : ""} · ${provenance}`
-    : "Evaluación en curso";
-  renderMatrixClose(finishedVers);
-}
-
-function renderMatrixClose(finishedVers) {
-  matrixClose.replaceChildren();
-  matrixClose.hidden = !finishedVers.length || Boolean(activeController);
-  if (matrixClose.hidden) return;
-  const certified = finishedVers.filter((v) => reportsByVersion.get(v).veredicto === "VERIFICADO");
-  const pending = finishedVers.filter((v) => reportsByVersion.get(v).accion_propuesta?.estado === "PENDIENTE_APROBACION");
-  const join = (list) => list.join(list.length === 2 ? " y " : ", ");
-  matrixClose.append(element("p", [
-    certified.length
-      ? `${join(certified)} ${certified.length === 1 ? "queda certificada" : "quedan certificadas"} para REN-001.`
-      : "Ninguna entrega queda certificada para REN-001.",
-    pending.length ? `Siguiente paso: decidir ${pending.length === 1 ? "la acción propuesta" : `las ${pending.length} acciones propuestas`} en Azure Boards.` : "No queda ninguna decisión pendiente en Azure Boards.",
-  ].join(" "), "matrix-close-text"));
-  if (!pending.length) return;
-  const jumps = element("div", null, "matrix-close-jumps");
-  for (const v of pending) {
-    const btn = element("button", `Revisar acción de ${v}`, "btn-secondary");
-    btn.type = "button";
-    btn.addEventListener("click", () => {
-      const gov = cards.get(v).querySelector(".governance");
-      gov.scrollIntoView({ behavior: reducedMotion.matches ? "auto" : "smooth", block: "center" });
-      (gov.querySelector(".btn-approve") || gov.querySelector("button:not([hidden])"))?.focus({ preventScroll: true });
-    });
-    jumps.append(btn);
-  }
-  matrixClose.append(jumps);
 }
 
 function renderAgentInvestigation(card, report) {
@@ -1756,7 +1713,6 @@ function renderGovernance(card, version, runId, action, focusResult = false) {
       }
       renderGovernance(card, version, runId, data.accion_propuesta, true);
       refreshStageViews();
-      updateTransitCorridor();
       setStatus(
         decision === "aprobar"
           ? `Tarea sincronizada en Azure Boards (${data.accion_propuesta?.boards_resultado?.referencia || "OK"})`
@@ -1783,8 +1739,9 @@ function renderGovernance(card, version, runId, action, focusResult = false) {
     let left = 5;
     confirmBox.replaceChildren();
     const msg = element("p", null, "gov-grace-text");
-    const undoBtn = element("button", "Deshacer", "btn-dismiss");
+    const undoBtn = element("button", "Deshacer", "btn-dismiss gov-grace-undo");
     undoBtn.type = "button";
+    card.dataset.grace = "true";
     const say = () => {
       msg.textContent = decision === "aprobar"
         ? `Se enviará a Azure Boards en ${left} s.`
@@ -1795,10 +1752,12 @@ function renderGovernance(card, version, runId, action, focusResult = false) {
       left -= 1;
       if (left > 0) return say();
       clearInterval(timer);
+      delete card.dataset.grace;
       submitDecision(decision);
     }, 1000);
     undoBtn.addEventListener("click", () => {
       clearInterval(timer);
+      delete card.dataset.grace;
       confirmBox.hidden = true;
       actionsRow.hidden = false;
       (decision === "aprobar" ? approveBtn : dismissBtn).focus();
@@ -1912,11 +1871,10 @@ function showReport(card, version, report, options = {}) {
   }
 
   renderDeterministicProof(card, report);
-  refreshStageViews();
   renderAgentInvestigation(card, report);
   renderGovernance(card, version, report.ejecucion?.id, report.accion_propuesta, false);
   renderDownloads(card, report);
-  updateTransitCorridor();
+  refreshStageViews();
   if (options.stamp) replayClass(card, "is-stamped", 820);
 
   if (!stageInspector.hidden && inspectedStage) {
@@ -1929,8 +1887,7 @@ function showReport(card, version, report, options = {}) {
 }
 
 function syncVisibleCardGrid() {
-  const visible = [...cards.values()].filter((c) => !c.hidden).length;
-  results.dataset.visibleCount = String(Math.max(visible, 1));
+  renderDossierTabs();
 }
 
 form.elements.modo.addEventListener("change", () => {
@@ -1947,27 +1904,20 @@ form.elements.modo.addEventListener("change", () => {
 filterDiffBtn.addEventListener("click", () => {
   // Remember where focus was so the re-render does not drop it to <body>.
   const active = document.activeElement;
-  const scope = active?.closest?.(".card, #shared-stages");
-  const focusedStage = scope ? active.dataset.stage : null;
+  const focusedStage = ledger.contains(active) ? active.dataset.stage : null;
 
   filterDiffOnly = !filterDiffOnly;
   filterDiffBtn.setAttribute("aria-pressed", String(filterDiffOnly));
-  corridorFilterNote.hidden = !filterDiffOnly;
   refreshStageViews();
   syncHash();
-  // List re-entry: short sibling stagger, capped so the whole list lands within ~0.4 s.
-  for (const container of [...cards.values(), sharedStagesBand]) {
-    container.querySelectorAll(".stage-list > li, .shared-stage-list > li, .stage-pass-strip, .stage-filter-empty").forEach((node, i) => {
-      animateIn(node, { dy: 6, delay: Math.min(i * 40, 200), duration: 220 });
-    });
-  }
-  if (focusedStage) {
-    const again = scope.querySelector(`[data-stage="${focusedStage}"]`);
-    (again || filterDiffBtn).focus();
-  }
+  // Row re-entry: short stagger, capped so the whole ledger lands within ~0.4 s.
+  ledger.querySelectorAll(".ledger-row, .ledger-empty-row").forEach((node, i) => {
+    animateIn(node, { dy: 6, delay: Math.min(i * 40, 200), duration: 220 });
+  });
+  if (focusedStage) (ledger.querySelector(`.ledger-cell-btn[data-stage="${focusedStage}"]`) || filterDiffBtn).focus();
   announce(filterDiffOnly
-    ? "Filtro activo: solo etapas incumplidas, sin confirmar, con atención requerida o con una señal por revisar."
-    : "Vista completa: brechas e informativas como filas, verificadas agrupadas al pie de cada entrega.");
+    ? "Filtro activo: la matriz muestra solo las etapas incumplidas, sin confirmar, con atención requerida o con una señal por revisar."
+    : "Vista completa: las 8 etapas en la matriz.");
 });
 
 cancelBtn.addEventListener("click", () => {
@@ -2215,7 +2165,7 @@ function reportEcosystemFailure(message) {
 }
 
 async function initEcosystem() {
-  initTransitCorridor();
+  initLedger();
   sandboxAlertWrap.hidden = true;
   try {
     const res = await fetch("/api/ecosistema");
@@ -2256,7 +2206,6 @@ async function initEcosystem() {
 
     if (versions.includes(autoVer)) {
       form.elements.version.value = autoVer;
-      corridorPrimed = true;
       await executeAssessment([autoVer], form.elements.modo.value, { preserveVisible: false });
     } else if (Object.keys(cachedLatest).length > 0) {
       restoreCachedRuns();
@@ -2266,7 +2215,6 @@ async function initEcosystem() {
     reportEcosystemFailure(describeFetchError(err, "No se pudo cargar el estado inicial."));
   } finally {
     // Stations only animate state changes after the first paint, never as page-load choreography.
-    corridorPrimed = true;
   }
 }
 

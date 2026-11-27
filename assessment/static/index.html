@@ -136,8 +136,8 @@
               <li><span class="ver-pip" data-state="verificado" aria-hidden="true"></span><span><strong>Verificado:</strong> la evidencia cumple la regla.</span></li>
               <li><span class="ver-pip" data-state="incumplido" aria-hidden="true"></span><span><strong>Incumplido:</strong> la evidencia contradice la regla.</span></li>
               <li><span class="ver-pip" data-state="pendiente" aria-hidden="true"></span><span><strong>Sin confirmar:</strong> falta un dato para decidir esta etapa. Es un estado de etapa: el dictamen «Evidencia insuficiente» solo se aplica a la entrega completa.</span></li>
-              <li><span class="ver-pip" data-state="atencion" aria-hidden="true"></span><span><strong>Atención requerida:</strong> hay hallazgos o una acción espera revisión humana.</span></li>
-              <li><span class="ver-pip" data-state="informativo" aria-hidden="true"></span><span><strong>Informativo:</strong> métrica recolectada sin regla que la apruebe o la rechace. Si lleva «· por revisar» o «· sin línea base», trae una señal que alguien debe mirar, y «Solo brechas» la mantiene visible.</span></li>
+              <li><span class="ver-pip" data-state="atencion" aria-hidden="true"></span><span><strong>Atención requerida</strong> (azul): hay hallazgos o una acción espera revisión humana. El ámbar queda solo para lo que falta confirmar.</span></li>
+              <li><span class="ver-pip" data-state="informativo" aria-hidden="true"></span><span><strong>Informativo:</strong> métrica recolectada sin regla que la apruebe o la rechace. Si lleva «· por revisar» o «· sin línea base» (en azul), trae una señal que alguien debe mirar, y «Solo brechas» la mantiene visible.</span></li>
               <li><span class="ver-pip" aria-hidden="true"></span><span><strong>Sin datos:</strong> la entrega aún no se ha evaluado en esta sesión.</span></li>
             </ul>
           </div>
@@ -159,8 +159,8 @@
             <dl class="shortcut-list">
               <div><dt><kbd>R</kbd></dt><dd>Lleva el foco a «Ejecutar evaluación» (Enter la inicia)</dd></div>
               <div><dt><kbd>D</kbd></dt><dd>Solo brechas</dd></div>
-              <div><dt><kbd>1</kbd>–<kbd>8</kbd></dt><dd>Abre la estación</dd></div>
-              <div><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Estación anterior o siguiente</dd></div>
+              <div><dt><kbd>1</kbd>–<kbd>8</kbd></dt><dd>Abre la etapa en la matriz</dd></div>
+              <div><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Etapa anterior o siguiente con el detalle abierto</dd></div>
               <div><dt><kbd>V</kbd></dt><dd>Cambia de versión en el inspector</dd></div>
               <div><dt><kbd>?</kbd></dt><dd>Abre o cierra esta guía</dd></div>
               <div><dt><kbd>Esc</kbd></dt><dd>Cierra el panel superior; dos veces detiene una evaluación</dd></div>
@@ -168,12 +168,6 @@
             <label class="shortcut-toggle"><input type="checkbox" id="shortcuts-toggle" checked> Atajos de una tecla activos</label>
           </div>
         </div>
-      </section>
-
-      <section class="verdict-strip" id="verdict-strip" aria-labelledby="verdict-strip-title" hidden>
-        <h2 id="verdict-strip-title" class="sr-only">Dictamen por entrega</h2>
-        <p class="verdict-headline"></p>
-        <ol class="verdict-list"></ol>
       </section>
 
       <form class="controls" id="controls">
@@ -223,75 +217,69 @@
       </div>
     </section>
 
-    <section class="transit-corridor" aria-labelledby="cycle-heading">
-      <div class="corridor-header">
-        <div>
-          <h2 id="cycle-heading">Corredor de trazabilidad de las 8 etapas DevSecOps</h2>
-          <p class="section-sub">Selecciona cualquier etapa<span class="kbd-hint"> (o pulsa <kbd>1</kbd>–<kbd>8</kbd>)</span> para inspeccionar la pregunta de gobierno, las métricas recolectadas y la comparación entre <code>v1</code>, <code>v2</code> y <code>v3</code>.</p>
-        </div>
-        <ul class="corridor-legend" id="corridor-legend" aria-label="Leyenda de estados de estación"></ul>
-        <p class="filter-note" id="corridor-filter-note" hidden>Filtro «Solo brechas» activo: el corredor muestra las 8 etapas; la matriz oculta las que no tienen brecha.</p>
+    <section class="results ledger-section" aria-labelledby="results-title">
+      <div class="results-head">
+        <h2 id="results-title">Matriz comparativa de entregas</h2>
+        <p class="section-sub">Cada fila es una etapa del recorrido DevSecOps y cada columna una entrega. El dictamen sale de la corrida, no del escenario.<span class="kbd-hint"> Pulsa <kbd>1</kbd>–<kbd>8</kbd> para abrir una etapa.</span></p>
+      </div>
+      <p class="ledger-headline" id="ledger-headline">Sin corridas todavía: pulsa «Ejecutar evaluación» para llenar la matriz.</p>
+      <p class="filter-note" id="ledger-filter-note" hidden></p>
+
+      <div class="ledger-frame">
+        <table class="ledger" id="ledger" role="table" data-running="false" aria-labelledby="results-title" aria-describedby="ledger-headline">
+          <thead id="ledger-head" role="rowgroup"></thead>
+          <tbody id="ledger-devsec" role="rowgroup" data-line="devsec"></tbody>
+          <tbody class="ledger-hub-group" role="rowgroup">
+            <tr class="ledger-hub" role="row">
+              <td colspan="4" id="ledger-hub-cell" role="cell">
+                <span class="hub-node">
+                  <svg viewBox="0 0 28 28" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                    <path d="M4 9h6l4 5 4-5h6M4 19h6l4-5 4 5h6"></path>
+                    <circle cx="14" cy="14" r="3"></circle>
+                  </svg>
+                  <strong>Núcleo determinista</strong>
+                  <span id="hub-line">QA + SecOps en paralelo · dictamen REN-001.v2 con revisión humana</span>
+                </span>
+              </td>
+            </tr>
+          </tbody>
+          <tbody id="ledger-cloudops" role="rowgroup" data-line="cloudops"></tbody>
+          <tfoot id="ledger-foot" role="rowgroup"></tfoot>
+        </table>
       </div>
 
-      <div class="corridor-map" id="corridor-map" data-running="false">
-        <div class="corridor-wing">
-          <h3 class="wing-heading" data-line="devsec"><span class="line-bullet" aria-hidden="true">DS</span>Línea DevSec · Código y evidencia</h3>
-          <ol class="station-list" id="loop-devsec" data-line="devsec"></ol>
-        </div>
-
-        <div class="corridor-hub">
-          <div class="hub-node">
-            <svg viewBox="0 0 28 28" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-              <path d="M4 9h6l4 5 4-5h6M4 19h6l4-5 4 5h6"></path>
-              <circle cx="14" cy="14" r="3"></circle>
-            </svg>
-            <strong>Núcleo determinista</strong>
-            <span id="hub-line">QA + SecOps en paralelo</span>
-            <span>Dictamen <code>REN-001.v2</code> con revisión humana</span>
+        <section id="stage-inspector" class="stage-inspector" data-docked="true" hidden aria-labelledby="stage-inspector-title" tabindex="-1">
+          <div class="inspector-topbar">
+            <div class="inspector-heading-group">
+              <h3 id="stage-inspector-title">Detalle de etapa</h3>
+              <span class="inspector-meta" id="stage-inspector-meta"></span>
+            </div>
+            <div class="inspector-controls">
+              <div class="inspector-version-tabs" id="inspector-version-tabs" role="group" aria-label="Versión inspeccionada en esta etapa"></div>
+              <button type="button" class="btn-ghost" id="inspector-prev-btn" aria-label="Etapa anterior">
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9.8 3.8 5.6 8l4.2 4.2"></path></svg>
+                <span>Anterior</span>
+              </button>
+              <button type="button" class="btn-ghost" id="inspector-next-btn" aria-label="Etapa siguiente">
+                <span>Siguiente</span>
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6.2 3.8 10.4 8l-4.2 4.2"></path></svg>
+              </button>
+              <button type="button" class="btn-ghost" id="inspector-close-btn">Cerrar<span class="kbd-hint"> (Esc)</span></button>
+            </div>
           </div>
-        </div>
-
-        <div class="corridor-wing">
-          <h3 class="wing-heading" data-line="cloudops"><span class="line-bullet" aria-hidden="true">CO</span>Línea CloudOps · Nube y gobierno</h3>
-          <ol class="station-list" id="loop-cloudops" data-line="cloudops"></ol>
-        </div>
-      </div>
-
-      <section id="stage-inspector" class="stage-inspector" hidden aria-labelledby="stage-inspector-title" tabindex="-1">
-        <div class="inspector-topbar">
-          <div class="inspector-heading-group">
-            <h3 id="stage-inspector-title">Detalle de etapa</h3>
-            <span class="inspector-meta" id="stage-inspector-meta"></span>
-          </div>
-          <div class="inspector-controls">
-            <div class="inspector-version-tabs" id="inspector-version-tabs" role="group" aria-label="Versión inspeccionada en esta etapa"></div>
-            <button type="button" class="btn-ghost" id="inspector-prev-btn" aria-label="Etapa anterior">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9.8 3.8 5.6 8l4.2 4.2"></path></svg>
-              <span>Anterior</span>
-            </button>
-            <button type="button" class="btn-ghost" id="inspector-next-btn" aria-label="Etapa siguiente">
-              <span>Siguiente</span>
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6.2 3.8 10.4 8l-4.2 4.2"></path></svg>
-            </button>
-            <button type="button" class="btn-ghost" id="inspector-close-btn">Cerrar<span class="kbd-hint"> (Esc)</span></button>
-          </div>
-        </div>
-        <div class="inspector-body" id="stage-inspector-body"></div>
-      </section>
+          <div class="inspector-body" id="stage-inspector-body"></div>
+        </section>
     </section>
 
-    <section class="results" aria-labelledby="results-title">
-      <div class="results-head">
+    <section class="dossier" aria-labelledby="dossier-title">
+      <div class="dossier-head">
         <div>
-          <h2 id="results-title">Matriz comparativa de entregas</h2>
-          <p class="section-sub">Las tres entregas lado a lado, etapa por etapa. El dictamen de cada una sale de su corrida, no de su nombre.</p>
+          <h2 id="dossier-title">Expediente por entrega</h2>
+          <p class="section-sub">Prueba determinista, decisión en Azure Boards y artefactos de una entrega a la vez.</p>
         </div>
+        <div class="dossier-tabs" id="dossier-tabs" role="tablist" aria-label="Entrega del expediente"></div>
       </div>
-
-      <section class="shared-stages" id="shared-stages" aria-label="Etapas comunes a las entregas comparadas" hidden></section>
-
-      <div class="cards" id="results" data-visible-count="3" aria-busy="false"></div>
-      <div class="matrix-close" id="matrix-close" role="region" aria-label="Cierre de la matriz" hidden></div>
+      <div class="cards" id="results" aria-busy="false"></div>
     </section>
   </main>
 
@@ -304,10 +292,7 @@
     <article class="card">
       <div class="card-band card-head-band">
         <div class="card-title-row">
-          <div>
-            <h3 class="card-version-title"></h3>
-            <p class="version-role"></p>
-          </div>
+          <h3 class="card-version-title"></h3>
           <span class="badge" data-state="idle">Sin ejecutar</span>
         </div>
         <div class="card-provenance-row">
@@ -323,7 +308,6 @@
       </div>
 
       <div class="card-band card-proof-band"></div>
-      <div class="card-band stages"></div>
 
       <div class="card-tail">
         <div class="card-band card-footer-band">
