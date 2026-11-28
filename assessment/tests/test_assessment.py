@@ -20,7 +20,7 @@ from assessment.analytics import analyze_observability_agent, build_powerbi_metr
 from assessment.ci import matches_expected
 from assessment.demo_reset import execute_demo_reset, restore_latest_archive
 from assessment.evidence import APP, CRITERION, PROJECT, collect, read_cobertura
-from assessment.integrations import audit_repo_governance, fetch_sonarqube_context, parse_boards_criteria
+from assessment.integrations import audit_repo_governance, fetch_github_context, fetch_sonarqube_context, parse_boards_criteria
 from assessment.policy import evaluate, evaluate_criteria_matrix, source_tests
 from assessment.powerbi_cloud import _build_executive_pbix, sync_powerbi_cloud
 from assessment.vulnerabilities import (
@@ -320,6 +320,30 @@ class DevSecOpsRegression(unittest.TestCase):
         report["ejecucion"] = execution
         deployed["revision_activa"] = None
         self.assertEqual(build_eight_stages(report, cloud)[4]["estado"], "pendiente")
+
+    def test_ci_toma_la_corrida_del_pipeline_y_no_la_de_dependabot(self):
+        pedidas: list[str] = []
+        pipeline = {"id": 7, "name": "DevSecOps", "status": "completed", "conclusion": "success",
+                    "head_sha": "def456", "html_url": "https://github.com/o/r/actions/runs/7"}
+
+        def api(method, url, headers, body=None, timeout=15):
+            pedidas.append(url)
+            if "/actions/workflows/devsecops.yml/runs?head_sha=" in url:
+                return {"workflow_runs": []}
+            if "/actions/workflows/devsecops.yml/runs?branch=main" in url:
+                return {"workflow_runs": [pipeline]}
+            if "/actions/runs?per_page=10" in url:  # todos los workflows: Dependabot corrió sobre el mismo commit
+                return {"workflow_runs": [{"id": 99, "name": "Dependabot Updates", "head_sha": "abc123"}, pipeline]}
+            if url.endswith("/artifacts"):
+                return {"artifacts": []}
+            return []
+
+        with (patch("assessment.integrations._gh_token", return_value=None),
+              patch("assessment.integrations._http_json", side_effect=api)):
+            ctx = fetch_github_context({"GITHUB_REPO": "o/r"}, "abc123")
+        self.assertEqual(ctx["pipeline_ci"]["run_id"], 7)
+        self.assertTrue(any("/actions/workflows/devsecops.yml/runs?head_sha=abc123" in u for u in pedidas))
+        self.assertFalse(any(u.endswith("/actions/runs?per_page=10") for u in pedidas))
 
     def test_concurrent_approvals_create_one_boards_task(self):
         first_query = Event()
