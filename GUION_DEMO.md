@@ -189,7 +189,7 @@ Todo lo que hagas durante una sesión (evaluaciones, contratos de prueba en `:50
 2. **Para dejar toda la sala limpia antes de la siguiente audiencia:** hacé clic arriba a la derecha en **«Reiniciar demo»**:
    - **Archivar corridas y reiniciar KPIs:** mueve las corridas actuales a `assessment/runs/_archivo_demos/<timestamp>/` (no se pierden).
    - **Limpiar contratos locales en `:5080`:** elimina los `datos.json` efímeros de `v1`, `v2` y `v3`.
-   - **Reiniciar tareas demo en Azure Boards** *(opcional)*: pasa las tareas `devsecops-fp-*` a estado `Removed` y restaura `AB#1` a su estado canónico.
+   - **Reiniciar tareas demo en Azure Boards** *(opcional)*: envía a la papelera de Boards las tareas `devsecops-fp-*` (se pueden restaurar; si el token no tiene permiso de borrado, quedan en `Removed`) y restaura `AB#1` a su estado canónico.
 3. **¿Querés recuperar la sesión anterior?** Abrí de nuevo **«Reiniciar demo»** y pulsá **«Restaurar última sesión archivada»**.
 
 ### Opción B — Desde Terminal (CLI)
@@ -203,6 +203,63 @@ assessment/.venv/bin/python -m assessment restaurar-demo
 # Reabrir una decisión individual por su ID de ejecución
 assessment/.venv/bin/python -m assessment reabrir --ejecucion <id_32_hex>
 ```
+
+---
+
+## 2.7 DEMO AUTOMATIZADA (Playwright · 8 a 12 minutos con narración)
+
+Playwright maneja la consola en Chrome de punta a punta: slides de transición, foco sobre cada etapa importante, narración consultiva con tu voz de ElevenLabs, pausa, paso a paso y velocidad 0,75×, 1× o 1,25×. Cuenta la historia de REN-001 con las tres entregas y, al terminar, deja todo como estaba para volver a ejecutarla.
+
+### Una sola vez: sesión de Power BI y voz
+- **Power BI.** `assessment/.venv/bin/python -m demo --iniciar-sesion` abre el reporte en el perfil de Chrome de la demo (`demo/.perfil`, fuera de git). Si Power BI lo pide, iniciá sesión y elegí mantenerla iniciada; cuando veas el reporte, cerrá la ventana y el comando comprueba que se dibuje. Solo hace falta repetirlo cuando la revisión previa avise que la sesión caducó.
+- **Voz.** Con `ELEVENLABS_VOICE_ID` y `ELEVENLABS_API_KEY` en `assessment/.env`, la demo narra con tu voz; si faltan, usa la voz neural del guion. Cada línea queda en `demo/.voz/` y solo se regeneran las que cambian (ElevenLabs cobra por carácter).
+
+### Ensayo (sin tokens, sin audio, sin grabación)
+```bash
+assessment/.venv/bin/python -m demo --ensayo --sin-voz --ventana
+```
+Recorre todo a ×6 con el motor «solo evidencia» en una ventana de 1440×900 y termina con «Ensayo terminado: N fallos de selectores o esperas». Sin `--sin-voz`, el ensayo además genera los clips de voz que falten.
+
+### Recorrido de revisión (capturas y PDF)
+```bash
+assessment/.venv/bin/python -m demo --sin-voz --sin-grabar
+```
+Corre en pantalla completa, como la presentación, para que las capturas tengan su alto real; al terminar, Q la cierra. Con `--ventana` la vista mide 1440×757: la barra de Chrome le quita alto y los subtítulos tapan cosas que en la presentación quedan libres.
+
+Con `--sin-voz`, la demo toma una captura a mitad de cada frase, con su subtítulo en pantalla, y otra por cada fallo. Al final arma `demo/.registro/<fecha>/recorrido.pdf`: una captura por página con su paso, el minuto, el tamaño de la vista y la frase, y los fallos en rojo. Sirve para encontrar errores y lo que podría verse mejor sin gastar clips de voz. Las capturas no alargan las frases. Si la corrida se corta antes de armarlo, cada captura ya quedó anotada en `capturas.jsonl` y el PDF se arma con:
+```bash
+assessment/.venv/bin/python -c "from pathlib import Path; from demo.__main__ import armar_pdf; print(armar_pdf(Path('demo/.registro/<fecha>')))"
+```
+
+### En vivo
+```bash
+assessment/.venv/bin/python -m demo                          # pantalla completa, agentes MAF, voz y grabación en ~/Movies
+assessment/.venv/bin/python -m demo --velocidad 1.25         # velocidad inicial: 0.75, 1 o 1.25
+assessment/.venv/bin/python -m demo --motor solo-evidencia   # plan B: sin modelo ni tokens
+```
+Otras opciones: `--paso-a-paso` (espera «Siguiente» en cada escena), `--sin-voz` (solo subtítulos, con capturas y PDF), `--sin-grabar` y `--ventana`. Si la consola no está en marcha en `:8050`, la demo la lanza y la apaga al final.
+
+| Tecla | Acción |
+|---|---|
+| Espacio o K | Pausa / continuar |
+| → o N | Siguiente paso |
+| `<` o `-` · `>` o `+` | Velocidad 0,75× · 1× · 1,25× |
+| P | Paso a paso |
+| Q dos veces | Terminar y restaurar el entorno |
+| Esc | Nada: no llega a la consola, donde dos seguidos cancelarían la evaluación en vivo |
+
+Mover el mouse muestra la barra de control. Al grabar, no lo muevas: la barra saldría en el video.
+
+### Revisión previa: lo que comprueba antes de presentar
+Consola en `:8050` · cambios sin commit en esas rutas que no dejó una demo (si los hay, se detiene antes de revertirlos: haz commit o stash) · reinicio previo (archiva corridas y revierte archivos de una demo anterior) · git limpio en `v1`, `v2`, `v3`, `Dockerfile`, `deploy` y `.github` · `v1`–`v3` compiladas para `:5080` · sesión de Azure CLI · base y escaneo de Trivy · ingreso de ACA (espera hasta 45 s, porque la app escala a cero) · Boards sin tareas de demo abiertas · respaldo del dataset de Power BI · sesión de Power BI · captura de la última corrida verde de GitHub Actions · voz. Si algo imprescindible falla, se detiene con «Revisión previa detenida: …» antes de presentar.
+
+> En pantalla completa, Power BI se ve unos segundos antes que la consola: la demo abre el reporte en su propia pestaña para heredar la sesión, antes de que empiece la grabación.
+
+### Al terminar (o si la cortás)
+Al final, con Q dos veces, con Ctrl+C o al cerrar la ventana o la terminal, la demo detiene `:5080` y borra sus datos, archiva las corridas, revierte la remediación, manda a la papelera de Boards las tareas de la demo y repone el dataset de Power BI. Termina con «Demo lista para volver a ejecutarse.» y deja el registro de tiempos en `demo/.registro/<fecha>.json`; si algo quedó pendiente (por ejemplo, Boards no respondió), lo avisa con «!» en vez de esa línea. Con la terminal cerrada, lo que imprime la restauración queda en `demo/.registro/salida.log`.
+
+### Presentar por Teams o Zoom
+Ninguno comparte el audio del navegador por defecto: al compartir pantalla, activá **«Incluir sonido»** en Teams o **«Compartir sonido»** en Zoom, o la audiencia no oirá la narración. Con `--sin-voz` no hace falta, porque van subtítulos.
 
 ---
 

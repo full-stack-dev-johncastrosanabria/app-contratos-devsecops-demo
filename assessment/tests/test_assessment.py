@@ -20,7 +20,7 @@ from assessment.analytics import analyze_observability_agent, build_powerbi_metr
 from assessment.ci import matches_expected
 from assessment.demo_reset import execute_demo_reset, restore_latest_archive
 from assessment.evidence import APP, CRITERION, PROJECT, collect, read_cobertura
-from assessment.integrations import audit_repo_governance, fetch_sonarqube_context, parse_boards_criteria
+from assessment.integrations import audit_repo_governance, fetch_github_context, fetch_sonarqube_context, parse_boards_criteria
 from assessment.policy import evaluate, evaluate_criteria_matrix, source_tests
 from assessment.powerbi_cloud import _build_executive_pbix, sync_powerbi_cloud
 from assessment.vulnerabilities import (
@@ -321,6 +321,30 @@ class DevSecOpsRegression(unittest.TestCase):
         deployed["revision_activa"] = None
         self.assertEqual(build_eight_stages(report, cloud)[4]["estado"], "pendiente")
 
+    def test_ci_toma_la_corrida_del_pipeline_y_no_la_de_dependabot(self):
+        pedidas: list[str] = []
+        pipeline = {"id": 7, "name": "DevSecOps", "status": "completed", "conclusion": "success",
+                    "head_sha": "def456", "html_url": "https://github.com/o/r/actions/runs/7"}
+
+        def api(method, url, headers, body=None, timeout=15):
+            pedidas.append(url)
+            if "/actions/workflows/devsecops.yml/runs?head_sha=" in url:
+                return {"workflow_runs": []}
+            if "/actions/workflows/devsecops.yml/runs?branch=main" in url:
+                return {"workflow_runs": [pipeline]}
+            if "/actions/runs?per_page=10" in url:  # todos los workflows: Dependabot corrió sobre el mismo commit
+                return {"workflow_runs": [{"id": 99, "name": "Dependabot Updates", "head_sha": "abc123"}, pipeline]}
+            if url.endswith("/artifacts"):
+                return {"artifacts": []}
+            return []
+
+        with (patch("assessment.integrations._gh_token", return_value=None),
+              patch("assessment.integrations._http_json", side_effect=api)):
+            ctx = fetch_github_context({"GITHUB_REPO": "o/r"}, "abc123")
+        self.assertEqual(ctx["pipeline_ci"]["run_id"], 7)
+        self.assertTrue(any("/actions/workflows/devsecops.yml/runs?head_sha=abc123" in u for u in pedidas))
+        self.assertFalse(any(u.endswith("/actions/runs?per_page=10") for u in pedidas))
+
     def test_concurrent_approvals_create_one_boards_task(self):
         first_query = Event()
         release_query = Event()
@@ -518,12 +542,18 @@ class DevSecOpsRegression(unittest.TestCase):
             fake_repo = base / "repo"
             (fake_repo / "v1" / "src" / "Contratos").mkdir(parents=True)
             (fake_repo / "v1" / "src" / "Contratos" / "datos.json").write_text("{}", encoding="utf-8")
-            reset_res = execute_demo_reset(fake_repo, runs_dir, reset_runs=True, reset_sandbox=True, reset_boards=False)
-            self.assertEqual(reset_res["corridas"]["archivadas"], 2)
-            self.assertIn("v1/src/Contratos/datos.json", reset_res["sandbox_archivos_limpiados"])
-            self.assertEqual(build_powerbi_metrics(runs_dir)["kpis"]["corridas_totales"], 0)
+            # La sincronización de arriba dejó _estado_powerbi.json: sin red, restaurar no debe tocar el Power BI real.
+            with (patch("urllib.request.urlopen") as red_real,
+                  patch("assessment.powerbi_cloud.sync_powerbi_cloud", return_value={"sincronizado": True}) as pbi_sync):
+                reset_res = execute_demo_reset(fake_repo, runs_dir, reset_runs=True, reset_sandbox=True, reset_boards=False)
+                self.assertEqual(reset_res["corridas"]["archivadas"], 2)
+                self.assertIn("v1/src/Contratos/datos.json", reset_res["sandbox_archivos_limpiados"])
+                self.assertEqual(build_powerbi_metrics(runs_dir)["kpis"]["corridas_totales"], 0)
 
-            restored_res = restore_latest_archive(runs_dir)
+                restored_res = restore_latest_archive(runs_dir)
+            red_real.assert_not_called()
+            pbi_sync.assert_called_once_with(runs_dir, ensure_report=False)
+            self.assertEqual(restored_res["powerbi"], {"sincronizado": True})
             self.assertEqual(restored_res["corridas_restauradas"], 2)
             self.assertEqual(build_powerbi_metrics(runs_dir)["kpis"]["corridas_totales"], 2)
 
@@ -663,6 +693,55 @@ class DevSecOpsRegression(unittest.TestCase):
             self.assertEqual(rev_sec["reporte_vulnerabilidades"]["abiertas"], 4)
             for rel, raw_bytes in orig_snapshots.items():
                 self.assertEqual((vuln_repo / rel).read_bytes(), raw_bytes)
+
+
+class BoardsPapelera(unittest.TestCase):
+    def test_reset_boards_papelera_y_fallback(self):
+        import urllib.error
+        from assessment.demo_reset import reset_boards_demo_state
+
+        calls = []
+
+        def api(method, url, headers, body=None, timeout=15):
+            calls.append((method, url, body))
+            if "/wiql" in url:
+                return {"workItems": [{"id": 11}, {"id": 12}]}
+            if method == "DELETE" and "/workitems/12" in url:
+                raise urllib.error.HTTPError(url, 403, "Forbidden", {}, None)
+            return {}
+
+        settings = {"AZURE_DEVOPS_ORG_URL": "https://dev.azure.com/o", "AZURE_DEVOPS_PROJECT": "P", "AZURE_DEVOPS_WORK_ITEM_ID": "1"}
+        with patch("assessment.demo_reset._ado_headers", return_value={"Authorization": "x"}), \
+             patch("assessment.demo_reset._http_json", side_effect=api):
+            res = reset_boards_demo_state(settings)
+
+        self.assertEqual(res["metodo_por_tarea"], {"AB#11": "papelera", "AB#12": "removed"})
+        self.assertEqual(res["tareas_retiradas"], ["AB#11", "AB#12"])
+        self.assertTrue(any(m == "DELETE" and "/workitems/11?" in u for m, u, _ in calls))
+        self.assertFalse(any(m == "PATCH" and "/workitems/11?" in u for m, u, _ in calls))
+        removed_patch = [b for m, u, b in calls if m == "PATCH" and "/workitems/12?" in u]
+        self.assertEqual(len(removed_patch), 1)
+        self.assertIn({"op": "add", "path": "/fields/System.State", "value": "Removed"}, removed_patch[0])
+
+
+
+class ReporteEjecutivo(unittest.TestCase):
+    def test_cada_visual_renombra_sus_campos(self):
+        # Power BI muestra el nombre crudo del campo (veredicto_ren001) salvo que el visual lo renombre en
+        # columnProperties; NativeReferenceName no se ve en pantalla.
+        import io
+        with zipfile.ZipFile(io.BytesIO(_build_executive_pbix("ds-1234"))) as zf:
+            layout = json.loads(zf.read("Report/Layout").decode("utf-16-le"))
+        nombres = {}
+        for vc in layout["sections"][0]["visualContainers"]:
+            visual = json.loads(vc["config"])["singleVisual"]
+            props = visual.get("columnProperties") or {}
+            for campo in visual["prototypeQuery"]["Select"]:
+                nombres.setdefault(campo["Name"], set()).add((props.get(campo["Name"]) or {}).get("displayName"))
+        self.assertEqual(nombres["Corridas.veredicto_ren001"], {"Dictamen REN-001", "Dictamen"})
+        self.assertEqual(nombres["Corridas.fecha_utc"], {"Fecha UTC"})
+        self.assertEqual(nombres["Corridas.version"], {"Entrega"})
+        self.assertEqual(nombres["Corridas.Total Corridas"], {"Corridas Auditadas", "Corridas"})
 
 
 if __name__ == "__main__":

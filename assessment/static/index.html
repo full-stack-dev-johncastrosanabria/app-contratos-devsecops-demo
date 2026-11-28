@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NextGen DevSecOps Assessment · Evaluador de renovaciones</title>
+  <title>NextGen DevSecOps Assessment · Evaluador de entregas</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
@@ -122,10 +122,16 @@
     <section class="command-deck" aria-labelledby="title">
       <div class="deck-header">
         <div class="deck-heading-block">
-          <h1 id="title">Evaluador de renovaciones</h1>
+          <div class="deck-title-row">
+            <h1 id="title">Evaluador de entregas</h1>
+            <div class="case-picker">
+              <button type="button" class="case-btn" id="case-btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="case-list" aria-describedby="case-rule-text"><span class="case-btn-label">Caso</span><span class="case-btn-name" id="case-btn-name">Portal de Contratos · REN-001</span><svg class="toggle-chevron" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4"></path></svg></button>
+              <ul class="case-list" id="case-list" role="listbox" aria-label="Casos que la consola evalúa" hidden></ul>
+            </div>
+          </div>
           <p class="deck-verdict" id="deck-verdict" aria-hidden="true" hidden></p>
           <p class="deck-rule">
-            <strong>Regla auditada (<code>REN-001</code>):</strong> al evaluar renovaciones, un contrato cancelado nunca debe generar un aviso. Tres agentes especializados en Microsoft Agent Framework (<strong>QA</strong>, <strong>SecOps · SonarQube/Trivy</strong> y <strong>SRE &amp; Gobernanza</strong>) investigan, triajan y proponen remediaciones en paralelo; la política determinista <code>REN-001.v2</code> valida cada evidencia antes de emitir el dictamen.
+            <strong>Regla auditada (<code id="case-rule-id">REN-001</code>):</strong> <span id="case-rule-text">Un contrato cancelado nunca debe recibir un aviso de renovación.</span> Tres agentes especializados en Microsoft Agent Framework (<strong>QA</strong>, <strong>SecOps · SonarQube/Trivy</strong> y <strong>SRE &amp; Gobernanza</strong>) investigan, triajan y proponen remediaciones en paralelo; la política determinista <code>REN-001.v2</code> valida cada evidencia antes de emitir el dictamen.
           </p>
         </div>
         <div class="deck-utility">
@@ -157,7 +163,7 @@
           <label class="shortcut-toggle"><input type="checkbox" id="reset-code-prs-chk" checked> Revertir cambios de código C# aplicados en v2/v3 y cerrar PRs efímeros en GitHub</label>
           <label class="shortcut-toggle"><input type="checkbox" id="reset-runs-chk" checked> Archivar corridas y reiniciar KPIs en pantalla</label>
           <label class="shortcut-toggle"><input type="checkbox" id="reset-sandbox-chk" checked> Limpiar contratos locales de prueba en :5080 (<code>datos.json</code> en v1, v2 y v3)</label>
-          <label class="shortcut-toggle"><input type="checkbox" id="reset-boards-chk"> Reiniciar tareas demo en Azure Boards (pasa <code>devsecops-fp-*</code> a <code>Removed</code> y restaura <code>AB#1</code>)</label>
+          <label class="shortcut-toggle"><input type="checkbox" id="reset-boards-chk"> Reiniciar tareas demo en Azure Boards (envía a la papelera las tareas <code>devsecops-fp-*</code> y restaura <code>AB#1</code>)</label>
         </div>
         <div class="demo-reset-actions">
           <button type="button" class="btn-primary" id="demo-reset-apply-btn"><span>Dejar listo para nueva demo</span></button>

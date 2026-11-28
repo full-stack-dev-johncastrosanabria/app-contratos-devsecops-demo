@@ -113,6 +113,13 @@ def _dataset_schema() -> dict:
     }
 
 
+def _con_nombres(cfg: dict) -> dict:
+    """Power BI enseña el nombre crudo del campo salvo que el visual lo renombre en columnProperties."""
+    visual = cfg["singleVisual"]
+    visual["columnProperties"] = {c["Name"]: {"displayName": c["NativeReferenceName"]} for c in visual["prototypeQuery"]["Select"]}
+    return cfg
+
+
 def _visual_card(idx: int, x: int, y: int, w: int, h: int, measure_name: str, title_text: str) -> dict:
     ref = f"Corridas.{measure_name}"
     vc_config = {
@@ -141,7 +148,7 @@ def _visual_card(idx: int, x: int, y: int, w: int, h: int, measure_name: str, ti
         "z": idx * 100,
         "width": w,
         "height": h,
-        "config": json.dumps(vc_config),
+        "config": json.dumps(_con_nombres(vc_config)),
         "filters": "[]",
     }
 
@@ -261,9 +268,9 @@ def _build_executive_pbix(dataset_id: str) -> bytes:
 
     visual_containers = [
         *cards,
-        {"x": 24, "y": 162, "z": 500, "width": 600, "height": 260, "config": json.dumps(col_chart_cfg), "filters": "[]"},
-        {"x": 640, "y": 162, "z": 600, "width": 616, "height": 260, "config": json.dumps(donut_cfg), "filters": "[]"},
-        {"x": 24, "y": 436, "z": 700, "width": 1232, "height": 264, "config": json.dumps(table_cfg), "filters": "[]"},
+        {"x": 24, "y": 162, "z": 500, "width": 600, "height": 260, "config": json.dumps(_con_nombres(col_chart_cfg)), "filters": "[]"},
+        {"x": 640, "y": 162, "z": 600, "width": 616, "height": 260, "config": json.dumps(_con_nombres(donut_cfg)), "filters": "[]"},
+        {"x": 24, "y": 436, "z": 700, "width": 1232, "height": 264, "config": json.dumps(_con_nombres(table_cfg)), "filters": "[]"},
     ]
 
     layout = {

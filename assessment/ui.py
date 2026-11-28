@@ -55,6 +55,8 @@ ASSETS = {
     "/favicon.svg": ("favicon.svg", "image/svg+xml"),
     "/brand-mark.png": ("brand-mark.png", "image/png"),
 }
+# La URL solo elige entre estos archivos, como en ASSETS: nada de ella llega a la ruta (CodeQL py/path-injection).
+LOGOS = {f"/logos/{p.name}": p for p in (STATIC / "logos").glob("*.svg")}
 COPILOT_FILES = {
     "/copilot/openapi.yaml": "openapi.yaml",
     "/copilot/security-copilot-skill.yaml": "security-copilot-skill.yaml",
@@ -263,6 +265,9 @@ class DemoHandler(BaseHTTPRequestHandler):
         if clean_path in ASSETS:
             name, mime = ASSETS[clean_path]
             self.send_content(200, (STATIC / name).read_bytes(), mime)
+            return
+        if clean_path in LOGOS:
+            self.send_content(200, LOGOS[clean_path].read_bytes(), "image/svg+xml")
             return
         if clean_path in COPILOT_FILES:
             target = COPILOT_DIR / COPILOT_FILES[clean_path]

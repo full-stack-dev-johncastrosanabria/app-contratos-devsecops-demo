@@ -1,0 +1,542 @@
+# Guion narrado de la demo REN-001 (python -m demo). Con voz no hay subtítulos; sin audio (--sin-voz,
+# ensayo o un clip que falla) cada línea se muestra como subtítulo.
+# Los pasos con «motor» solo corren con ese motor; el ensayo usa solo-evidencia.
+# Los botones que se arman con doble pulsación cambian de texto: se ubican por CSS, nunca por su nombre.
+# La consola desactiva «Iniciar vN en :5080» mientras evalúa: el portal se enseña antes y después de cada evaluación.
+voz: es-MX-DaliaMultilingualNeural
+escenas:
+  - id: portada
+    titulo: Portada
+    pasos:
+      - tipo: slide
+        plantilla: portada
+        titulo: NextGen DevSecOps Assessment
+        subtitulo: Evidencia verificable de cada entrega, en las ocho etapas del ciclo DevSecOps
+        voz: >-
+          Les doy la bienvenida. En los próximos minutos les voy a mostrar cómo responder, con evidencia
+          verificable, una pregunta que hoy cuesta horas: si una entrega está lista para producción.
+
+  - id: pregunta
+    titulo: La pregunta
+    pasos:
+      - tipo: slide
+        plantilla: pregunta
+        pregunta: ¿Qué evidencia tenemos de que esta versión cumple lo acordado?
+        fuentes:
+          - {nombre: Azure Boards, logo: /logos/azure-devops.svg}
+          - {nombre: GitHub, logo: /logos/github.svg}
+          - {nombre: Pipelines, logo: /logos/azure-pipelines.svg}
+          - {nombre: Azure Monitor, logo: /logos/monitor.svg}
+        remate: Un pipeline en verde no equivale a evidencia.
+        voz: >-
+          Solemos ver los checks en verde y dar por hecho que una versión está lista. Pero si un auditor
+          pregunta qué evidencia hay de que cumple lo acordado, la respuesta está repartida entre Boards,
+          GitHub, los pipelines y Azure Monitor.
+
+  - id: caso
+    titulo: El caso
+    pasos:
+      - tipo: narrar
+        foco: ".masthead .brand"
+        etiqueta: Evaluador de entregas
+        opcional: true
+        voz: >-
+          Esta es la consola: un evaluador de entregas sobre Microsoft Agent Framework y Azure AI Foundry,
+          que trabaja por casos.
+      - tipo: clic
+        selector: "#case-btn"
+      - tipo: narrar
+        foco: "#case-list"
+        etiqueta: Caso
+        voz: >-
+          Elegimos el caso: el Portal de Contratos y su criterio REN-001, fijado en Azure Boards. Un contrato
+          cancelado nunca debe recibir un aviso de renovación.
+      - tipo: clic
+        selector: '#case-list .case-option[data-caso="contratos-ren-001"]'
+      - tipo: slide
+        plantilla: caso
+        regla: REN-001 · Un contrato cancelado nunca genera aviso de renovación
+        entregas:
+          - {version: Versión 1, tono: pass, escenario: código excluye cancelados · con prueba REN-001}
+          - {version: Versión 2, tono: fail, escenario: regresión funcional en cancelados}
+          - {version: Versión 3, tono: warn, escenario: suite en verde sin prueba vinculada a REN-001}
+        voz: >-
+          Tres entregas candidatas compiten por llegar a producción, cada una construida para un escenario
+          distinto.
+      - tipo: clic
+        selector: "#sandbox-toggle"
+        voz: Antes de mirar la evidencia, veamos la aplicación con datos. Levantamos la versión 1 en local.
+      - tipo: clic
+        selector: '[data-launch="v1"]'
+      - tipo: esperar
+        condicion: &v1-activa >-
+          document.querySelector('#sandbox-pill').dataset.active === 'true' &&
+          document.querySelector('#sandbox-pill').dataset.version === 'v1'
+        max_s: 60
+        espera_s: [2, 5]
+        en_vivo: la consola levanta la versión 1 en :5080
+      - tipo: app
+        titulo: Portal de Contratos · versión 1
+        limpiar: true
+      - tipo: narrar
+        opcional: true
+        voz: El portal avisa de cada renovación a treinta, siete y un día del vencimiento.
+      - tipo: clic
+        selector: "#btn-simular"
+        voz: El simulador crea un contrato que vence en siete días, lo cancela y evalúa las renovaciones.
+      - tipo: esperar
+        condicion: &observado /OBSERVADO/.test(document.querySelector('#estado')?.textContent || '')
+        max_s: 30
+        espera_s: [0.5, 2]
+        en_vivo: el portal evalúa las renovaciones
+      - tipo: narrar
+        foco: "#estado"
+        etiqueta: Versión 1
+        voz: "En la versión 1, el contrato cancelado queda excluido: cero avisos. Es lo que pide REN-001."
+      - tipo: app
+        cerrar: true
+      - tipo: clic
+        selector: '[data-launch="v2"]'
+        confirmar: true
+        voz: Ahora, la versión 2.
+      - tipo: esperar
+        condicion: >-
+          document.querySelector('#sandbox-pill').dataset.active === 'true' &&
+          document.querySelector('#sandbox-pill').dataset.version === 'v2'
+        max_s: 60
+        espera_s: [2, 5]
+        en_vivo: la consola levanta la versión 2 en :5080
+      - tipo: app
+        titulo: Portal de Contratos · versión 2
+        limpiar: true
+      - tipo: clic
+        selector: "#btn-simular"
+      - tipo: esperar
+        condicion: *observado
+        max_s: 30
+        espera_s: [0.5, 2]
+        en_vivo: el portal evalúa las renovaciones
+      - tipo: narrar
+        foco: "#estado"
+        etiqueta: Versión 2
+        voz: >-
+          En la versión 2, el contrato cancelado sí recibe un aviso. Ese es el bug: alguien que ya dejó
+          de ser cliente recibiría una invitación a renovar.
+      - tipo: narrar
+        foco: ".kpi-grid"
+        etiqueta: Datos del portal
+        opcional: true
+        voz: Un contrato en cartera, cancelado, y un aviso emitido.
+      - tipo: app
+        cerrar: true
+      - tipo: clic
+        selector: "#stop-sandbox"
+        confirmar: true
+        voz: La pregunta es si la evidencia de cada entrega lo detecta, sin que nadie tenga que probarlo a mano.
+      - tipo: esperar
+        condicion: document.querySelector('#sandbox-pill').dataset.active === 'false'
+        max_s: 30
+        espera_s: [0.5, 2]
+        en_vivo: la consola detiene :5080
+      - tipo: clic
+        selector: "#sandbox-toggle"
+
+  - id: ejecutar
+    titulo: Ejecutar
+    pasos:
+      - tipo: elegir
+        selector: "#scope-select"
+        valor: todas
+      - tipo: elegir
+        motor: agente
+        selector: "#mode-select"
+        valor: agente
+      - tipo: elegir
+        motor: solo-evidencia
+        selector: "#mode-select"
+        valor: solo-evidencia
+      - tipo: clic
+        motor: agente
+        selector: "#run-btn"
+        confirmar: true
+        voz: Elegimos las tres entregas y el motor con agentes, y ejecutamos.
+      - tipo: clic
+        motor: solo-evidencia
+        selector: "#run-btn"
+        confirmar: true
+        voz: Elegimos las tres entregas y el motor de solo evidencia, sin tokens, y ejecutamos.
+
+  - id: mientras-corre
+    titulo: Mientras corre
+    pasos:
+      - tipo: slide
+        motor: agente
+        plantilla: maf
+        voz: >-
+          Mientras corre, veamos qué pasa tras bambalinas. Un recolector reúne la evidencia de cada entrega
+          con su huella criptográfica, tres agentes la investigan en paralelo y una política determinista
+          emite el dictamen: los agentes explican, pero decide el código.
+      - tipo: slide
+        motor: solo-evidencia
+        plantilla: maf
+        voz: >-
+          Así funciona con agentes: tres investigadores en paralelo que convergen en una política
+          determinista. Con el motor de solo evidencia el flujo los omite: el recolector y la misma política
+          emiten el dictamen, sin consumir tokens.
+      # La captura y las cajas salen de la revisión previa (demo/actions.py): la corrida verde más reciente en main.
+      - tipo: slide
+        plantilla: captura
+        voz:
+          - >-
+            Y así se ve el CI/CD de este repositorio en GitHub Actions: la corrida verde más reciente en main.
+            Primero, las pruebas xUnit de cada entrega, con su reporte de pruebas como artefacto.
+          # Spec: no se narra que «debería salir en rojo»; solo por qué sale en verde (assessment/ci.py).
+          - "Cada job comprueba que su entrega deje la evidencia de su escenario: en la versión 2, que la prueba de REN-001 falle. Por eso sale en verde."
+          - En paralelo, CodeQL analiza el código C# y Python.
+          - Trivy revisa el repositorio, el Dockerfile y los manifiestos en busca de dependencias vulnerables, secretos y malas configuraciones.
+          # El paso OCI solo acepta v1 o v3 (devsecops.yml): la imagen de v2 nunca se publica.
+          - Con las pruebas en orden, se construye la imagen del contenedor y se publica en GitHub Container Registry, nunca la de la versión 2. Este pipeline no despliega.
+          - "Y fíjense en la versión 3: su job sale en verde, con todas sus pruebas pasando. Pero ninguna de ellas demuestra REN-001."
+        focos:
+          - ["Evidencia xUnit (v1)", "Evidencia xUnit (v2)", "Evidencia xUnit (v3)"]
+          - ["Evidencia xUnit (v2)"]
+          - ["Seguridad en origen (CodeQL) (csharp, autobuild)", "Seguridad en origen (CodeQL) (python, none)"]
+          - ["Escaneo IaC, contenedor y SCA (Trivy)"]
+          - ["Construir imagen OCI (GHCR)"]
+          - ["Evidencia xUnit (v3)"]
+      - tipo: narrar
+        foco: "#ledger"
+        etiqueta: Matriz de evaluación
+        voz: "Volvamos a la consola: la matriz se llena en vivo."
+      # espera_s es lo que queda de una corrida de 110–210 s tras el grafo y Actions (69 s a 1,25×, 113 s a 0,75×).
+      # Medido el 27 nov 2026: la corrida tardó ~135 s y la narración tapó la espera.
+      - tipo: esperar
+        motor: agente
+        condicion: &dictamenes >-
+          document.querySelector('#ledger').dataset.running === 'false' &&
+          ['v1', 'v2', 'v3'].every((v) =>
+            ['pass', 'fail', 'unknown'].includes(document.querySelector(`#ledger-head th.ledger-ver[data-ver="${v}"]`)?.dataset.verdict) &&
+            document.querySelector(`#card-${v} .provenance-chip`)?.dataset.live === 'true')
+        max_s: 420
+        espera_s: [41, 97]
+        en_vivo: los agentes evalúan las tres entregas
+        agentes: true  # el chip «En vivo» muestra a los tres agentes trabajando
+        # La tarjeta con error solo se ve con su pestaña activa: primero la pestaña, luego «Reintentar vN con Solo evidencia».
+        si_error: &reintento >-
+          #results .card-alert:not([hidden]) .btn-inline-action[data-eval]:not([disabled]),
+          #dossier-tabs .dossier-tab[data-verdict="error"][aria-selected="false"]
+        voz_mientras:
+          - >-
+            Primero, el recolector fija la evidencia: el commit, el reporte de pruebas y el estado en Boards,
+            GitHub y Azure, cada artefacto con su huella.
+          - >-
+            Después trabajan los tres agentes. El de calidad y trazabilidad busca, para cada criterio, una
+            prueba que lo ejercite de verdad.
+          - El de seguridad cruza SonarQube, Trivy y CodeQL con la postura de Defender for Cloud.
+          - Y el de operación y gobierno compara la telemetría reciente de Application Insights con su línea base.
+          - >-
+            Si un agente no responde a tiempo, la consola lo registra como diagnóstico operativo y el
+            dictamen no cambia: lo decide la política.
+          - >-
+            ¿Y si el modelo alucina que una prueba existe o que pasó? No puede alterar el resultado: cada
+            archivo, línea y ejecución que cita se contrasta con el código fuente y el reporte de pruebas.
+          - >-
+            Y todo lo que toca la demo es reversible: el reinicio archiva las corridas, restaura el código y
+            retira de Boards las tareas de prueba.
+        # Solo suena si la evaluación sigue en curso; nada aquí depende del motor.
+        relleno: &relleno
+          - >-
+            ¿Sirve solo para este stack? No: los recolectores están desacoplados, así que la misma
+            arquitectura evalúa JUnit o PyTest, Azure Pipelines o Azure Repos cambiando solo el adaptador de
+            lectura.
+          - >-
+            ¿Y si alguien deja instrucciones en el código para engañar al agente? Las herramientas tratan el
+            código y los reportes como datos de solo lectura, y al correr las pruebas se retiran del entorno
+            las credenciales de IA.
+          - Cada corrida queda archivada con su evidencia y sus huellas, así que cualquier dictamen se puede auditar después.
+          - Mientras terminan, fíjense en la matriz. Cada celda es una etapa de una entrega y enlaza con su evidencia.
+      - tipo: esperar
+        motor: solo-evidencia
+        condicion: *dictamenes
+        max_s: 240
+        espera_s: [10, 30]
+        en_vivo: la consola evalúa las tres entregas
+        si_error: *reintento
+        voz_mientras:
+          - Sin modelo, la consola recolecta la evidencia de cada entrega y la política emite el dictamen, sin consumir tokens.
+        relleno: *relleno
+
+  - id: dictamen
+    titulo: El dictamen
+    pasos:
+      - tipo: narrar
+        lupa: "#ledger-head > tr.ledger-head-row"
+        voz: >-
+          Ahí están los tres dictámenes. La versión 1 queda verificada: su prueba de REN-001 ejercitó el caso
+          cancelado y pasó. La versión 2 queda incumplida: esa prueba falló, por el aviso que vimos en el
+          portal.
+      # Solo la matriz: la cabecera del informe lleva rutas locales y las demás secciones, texto de los agentes.
+      - tipo: slide
+        plantilla: documento
+        informe: v2
+        secciones: [Matriz de criterios evaluados]
+        titulo: informe.md · versión 2
+        voz: >-
+          Este es el informe de la versión 2: cada criterio con su veredicto y la prueba que lo respalda.
+      - tipo: narrar
+        opcional: true
+        voz: "REN-001 queda incumplido y REN-002, verificado: cada criterio se juzga por separado."
+      - tipo: clic
+        selector: "#filter-diff-btn"
+      - tipo: narrar
+        opcional: true
+        voz: Con «Solo brechas», la matriz deja a la vista solo las etapas que piden revisión.
+
+  - id: momento-v3
+    titulo: El momento clave
+    pasos:
+      - tipo: clic
+        selector: "#tab-v3"
+        voz: "Y ahora, el momento clave: la versión 3. Abramos su expediente."
+      - tipo: narrar
+        foco: "#card-v3 .card-proof-band"
+        etiqueta: Pruebas de la versión 3
+        voz: >-
+          Sus pruebas están en verde, igual que en GitHub Actions. En un proceso tradicional, esta versión
+          pasaría derecho a producción.
+      - tipo: clic
+        selector: '.ledger-cell-btn[data-stage="4"][data-ver="v3"]'
+        voz: Veamos su etapa de integración y pruebas.
+      - tipo: narrar
+        foco: "#stage-inspector-body .inspector-answer-block"
+        etiqueta: Respuesta en v3
+        voz: >-
+          Pero ninguna de esas pruebas está vinculada a REN-001: nadie comprobó qué pasa con un contrato
+          cancelado.
+      - tipo: narrar
+        foco: '#ledger-head th.ledger-ver[data-ver="v3"]'
+        etiqueta: Dictamen de la versión 3
+        voz: >-
+          Por eso el dictamen es evidencia insuficiente: código en verde sin evidencia del criterio no se
+          certifica.
+      - tipo: narrar
+        motor: agente
+        opcional: true
+        voz: Con agentes, el de calidad revisa además el código de las pruebas para explicar por qué falta esa evidencia.
+
+  - id: seguridad
+    titulo: Seguridad en origen
+    pasos:
+      # Con «Solo brechas» activo, «Anterior» salta las etapas sin nada que revisar; la 3 lo tiene (SEC-DOCKER-001).
+      - tipo: clic
+        selector: "#inspector-prev-btn"
+        voz: Un paso atrás está la etapa 3, seguridad en origen.
+      - tipo: narrar
+        lupa: '#stage-inspector-body .vuln-table tbody tr:has-text("SEC-DOCKER-001")'
+        voz: >-
+          El reporte cruza SonarQube, Trivy y OWASP. Este hallazgo, por ejemplo: la imagen del contenedor
+          corre como root, y Trivy lo marca con severidad alta.
+      - tipo: clic
+        selector: '#stage-inspector-body .vuln-table tbody tr:has-text("SEC-DOCKER-001") button:has-text("Corregir en Etapa 8")'
+      - tipo: clic
+        selector: '#stage-inspector-body button:has-text("Parche determinista")'
+        voz: Lo corregimos con el parche determinista, sin tokens.
+      - tipo: clic
+        selector: "#stage-inspector-body .rem-exec-bar .btn-approve"
+        confirmar: true
+        voz: Y reauditamos la etapa 3.
+      - tipo: esperar
+        condicion: >-
+          /^SEC-DOCKER-001 mitigada y auditada en Etapa 3/.test(document.querySelector('#status').textContent) &&
+          document.querySelector('#status-banner').dataset.tone === 'pass'
+        max_s: 120
+        espera_s: [3, 15]
+        en_vivo: Trivy reaudita la etapa 3
+        voz_mientras:
+          - >-
+            Trivy vuelve a escanear el repositorio con el Dockerfile corregido. El cambio es local, y el
+            reinicio de la demo lo deshace.
+      - tipo: clic
+        selector: '#stage-inspector-body button:has-text("Ver reporte en Etapa 3")'
+      - tipo: narrar
+        foco: "#stage-inspector-body .scanner-engines-grid .scanner-card:last-child"
+        etiqueta: Aqua Trivy
+        voz: Trivy ya no reporta misconfiguraciones de severidad alta, y el control queda verificado.
+
+  - id: gobernanza
+    titulo: Gobernanza
+    pasos:
+      - tipo: slide
+        plantilla: gobernanza
+        pasos:
+          - El flujo detecta la brecha y guarda un punto de control
+          - {texto: Una persona revisa y aprueba, destacar: true}
+          - La tarea nace en Azure Boards, hija de la historia
+          - Una huella idempotente evita duplicados
+        voz: >-
+          Volvamos al bug de la versión 2. El flujo no ensucia el backlog por su cuenta: espera la decisión
+          de una persona y, al aprobar, crea la tarea en Azure Boards como hija de la historia, con el commit
+          exacto y la brecha.
+      - tipo: clic
+        selector: "#inspector-close-btn"
+      - tipo: clic
+        selector: "#tab-v2"
+      - tipo: escribir
+        selector: "#gov-note-v2"
+        texto: Excluir los contratos cancelados antes de producción
+      - tipo: clic
+        selector: "#card-v2 .gov-buttons .btn-approve"
+        voz: En la demo pulsamos nosotros; en la operación real, la aprobación la da una persona del equipo.
+      # «Aprobar» abre un recuadro de confirmación y, tras confirmar, deja 5 s para deshacer antes de enviar.
+      - tipo: clic
+        selector: "#card-v2 .gov-confirm-bar .btn-approve"
+      - tipo: esperar
+        condicion: >-
+          /^AB#\d+$/.test(document.querySelector('#card-v2 .gov-panel[data-state="APROBADA"] .gov-result a span')?.textContent || '') &&
+          /sin duplicados en Boards/.test(document.querySelector('#card-v2 .gov-result').textContent)
+        max_s: 90
+        espera_s: [6, 12]
+        en_vivo: enviando la tarea a Azure Boards
+        voz_mientras:
+          - Hay cinco segundos para deshacer; después, la aprobación queda registrada en Azure Boards.
+      - tipo: narrar
+        lupa: "#card-v2 .gov-result"
+        voz: Aquí está la tarea, hija de la historia de negocio.
+      - tipo: narrar
+        opcional: true
+        voz: >-
+          Y gracias a una huella determinista, si mañana se reevalúa y la tarea sigue abierta, se comenta en
+          la misma tarea en lugar de duplicarla.
+
+  - id: remediacion
+    titulo: Remediación
+    pasos:
+      - tipo: clic
+        selector: "#card-v2 .remediation .rem-actions .btn-ghost"
+        voz: "Ahora, la remediación, con la plantilla de contingencia: sin tokens."
+      - tipo: narrar
+        foco: "#card-v2 .rem-output"
+        etiqueta: Corrección propuesta
+        voz: "La propuesta corrige Renovaciones.cs: excluye los contratos cancelados antes de crear el aviso."
+      # «Aplicar en local y reevaluar» reevalúa con el motor elegido: con solo evidencia no gasta tokens.
+      - tipo: elegir
+        selector: "#mode-select"
+        valor: solo-evidencia
+      - tipo: clic
+        selector: "#card-v2 .rem-exec-bar .btn-approve"
+        confirmar: true
+        voz: Aplicamos en local y reevaluamos.
+      - tipo: esperar
+        condicion: document.querySelector('#card-v2')?.dataset.verdict === 'pass'
+        max_s: 150
+        espera_s: [18, 35]
+        en_vivo: reevaluando la versión 2
+        voz_mientras:
+          - "Para reevaluar no hace falta el modelo: el dictamen lo emite la misma política determinista, sin tokens."
+          - >-
+            Mientras tanto, la consola guarda un respaldo del archivo original, escribe la corrección y vuelve
+            a correr las pruebas. Todo es reversible: un clic restaura el código original.
+      - tipo: narrar
+        foco: '#ledger-head th.ledger-ver[data-ver="v2"], #ledger .ledger-cell-btn[data-ver="v2"]'
+        etiqueta: Versión 2
+        voz: "La versión 2 pasa a verificada: la prueba de REN-001 ahora pasa."
+      - tipo: clic
+        selector: "#card-v2 .governance .gov-panel > .btn-approve"
+        voz: Y como quedó verificada, cerramos la tarea en Azure Boards.
+      - tipo: esperar
+        condicion: >-
+          /^Tarea cerrada tras verificación determinista/.test(document.querySelector('#card-v2 .gov-result')?.textContent || '')
+        max_s: 90
+        espera_s: [2, 10]
+        en_vivo: cerrando la tarea en Azure Boards
+        voz_mientras:
+          - El ciclo termina con la misma trazabilidad con que empezó.
+      # La reevaluación ya compiló el código corregido: «Iniciar v2» levanta esa versión.
+      - tipo: clic
+        selector: "#sandbox-toggle"
+        voz: "Falta la prueba de fuego: el mismo portal, con la corrección."
+      - tipo: clic
+        selector: '[data-launch="v2"]'
+      - tipo: esperar
+        condicion: >-
+          document.querySelector('#sandbox-pill').dataset.active === 'true' &&
+          document.querySelector('#sandbox-pill').dataset.version === 'v2'
+        max_s: 60
+        espera_s: [2, 5]
+        en_vivo: la consola levanta la versión 2 corregida en :5080
+      - tipo: app
+        titulo: Portal de Contratos · versión 2 corregida
+        limpiar: true
+      - tipo: clic
+        selector: "#btn-simular"
+      - tipo: esperar
+        condicion: *observado
+        max_s: 30
+        espera_s: [0.5, 2]
+        en_vivo: el portal evalúa las renovaciones
+      - tipo: narrar
+        foco: "#estado"
+        etiqueta: Versión 2 corregida
+        voz: La misma simulación, y el contrato cancelado ya no recibe ningún aviso.
+      - tipo: narrar
+        opcional: true
+        voz: La corrección se ve en los datos, no solo en las pruebas.
+      - tipo: app
+        cerrar: true
+      - tipo: clic
+        selector: "#sandbox-toggle"
+      - tipo: narrar
+        opcional: true
+        voz: Si prefieren su flujo de revisión habitual, la misma corrección puede salir como rama y pull request en GitHub.
+
+  - id: valor
+    titulo: Valor continuo
+    pasos:
+      - tipo: narrar
+        foco: "#value-kpis"
+        etiqueta: Valor continuo
+        opcional: true
+        voz: "Cada corrida alimenta estos indicadores: controles con evidencia, criterios vigentes y el ciclo en Boards."
+      - tipo: clic
+        selector: "#open-powerbi-web-btn"
+        voz: Con un clic, la consola publica las corridas en Power BI.
+      - tipo: esperar
+        condicion: >-
+          /^Reporte ejecutivo actualizado en Power BI Web/.test(document.querySelector('#status').textContent) &&
+          document.querySelector('#status-banner').dataset.tone === 'pass'
+        max_s: 60
+        espera_s: [3, 8]
+        en_vivo: la consola sincroniza las corridas con Power BI
+        voz_mientras: Lo hace con la API de Power BI, sin exportar archivos ni copiar hojas de cálculo.
+      # El reporte se ve dentro de la demo; la pestaña que abriría la consola queda bloqueada (SIN_VENTANAS).
+      - tipo: reporte
+        titulo: Reporte ejecutivo de Power BI
+        max_s: 60
+        espera_s: [4, 12]
+        voz: >-
+          Este es el reporte ejecutivo en Power BI, con las corridas de esta demo. El comité de release lo
+          sigue sin abrir la consola.
+      - tipo: narrar
+        opcional: true
+        voz: Las mismas corridas también se exportan en CSV y en JSON para Microsoft Fabric.
+
+  - id: cierre
+    titulo: Cierre
+    pasos:
+      - tipo: clic
+        selector: "#case-btn"
+      - tipo: narrar
+        foco: "#case-list"
+        etiqueta: Casos
+        voz: Hoy fue el Portal de Contratos. El siguiente caso es el suyo.
+      - tipo: slide
+        plantilla: cierre
+        tesis:
+          - {texto: "Los agentes investigan; una política determinista decide", icono: investigar}
+          - {texto: "Un pipeline en verde no equivale a evidencia del criterio", icono: evidencia}
+          - {texto: "Ninguna tarea entra al backlog sin una decisión humana", icono: humano}
+        cta: Una aplicación crítica · sus dos últimas entregas · dos semanas
+        voz: >-
+          Para aterrizarlo en su contexto, les propongo algo concreto: elijamos una aplicación crítica y sus
+          dos últimas entregas. Conectamos este mismo flujo sobre su Boards, su pipeline y su suscripción de
+          Azure, y en dos semanas tienen su línea base de controles verificados. Gracias.

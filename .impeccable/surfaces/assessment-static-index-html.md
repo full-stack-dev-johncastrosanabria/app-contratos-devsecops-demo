@@ -10,7 +10,7 @@ related_targets: ["assessment/static/style.css","assessment/static/app.js"]
 - **Scope:** Superficie operativa principal (`http://127.0.0.1:8050`) compuesta por `assessment/static/index.html`, `assessment/static/style.css` y `assessment/static/app.js`.
 - **Visitor Mode:** `Operate` (con lectura ejecutiva rápida de dictámenes comparados).
 - **Audience & Task:** Líderes técnicos, QA, SecOps y CISOs que ejecutan o inspeccionan la auditoría determinista `REN-001.v2` sobre `v1`, `v2` y `v3`, contrastan las 8 etapas DevSecOps y aprueban o descartan acciones idempotentes en Azure Boards.
-- **Constraints:** Tema claro exclusivo en gama azul institucional (`PRODUCT.md`), CSP estricta `default-src 'self'` sin CDNs externos ni estilos/scripts inline, preservación íntegra de contratos HTTP y del texto `Evaluador de renovaciones`.
+- **Constraints:** Tema claro exclusivo en gama azul institucional (`PRODUCT.md`), CSP estricta `default-src 'self'` sin CDNs externos ni estilos/scripts inline, preservación íntegra de contratos HTTP y del texto `Evaluador de entregas`. La consola se presenta como evaluador de casos: el título nombra el producto y el selector `#case-btn` el caso auditado (hoy uno: Portal de Contratos · REN-001); decisión del usuario del 27 nov 2026.
 
 ## Direction contract
 

@@ -9,6 +9,11 @@ from unittest.mock import patch
 
 from assessment.ui import DemoHandler
 
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:  # pragma: no cover - el venv de la demo la instala
+    sync_playwright = None
+
 
 class DemoHTTP(unittest.TestCase):
     def test_local_web_contract(self):
@@ -45,7 +50,7 @@ class DemoHTTP(unittest.TestCase):
             try:
                 with (patch("assessment.ui.OUTPUT", root),
                       patch("assessment.ui.assess_project", return_value=report) as assess):
-                    self.assertIn(b'Evaluador de renovaciones', request("GET", "/")[1])
+                    self.assertIn(b'Evaluador de entregas', request("GET", "/")[1])
                     self.assertEqual(request("POST", "/api/evaluar", "{}")[0], 403)
                     self.assertEqual(request("POST", "/api/evaluar", '{"version":"../v2","modo":"agente"}', origin)[0], 400)
                     status, body = request("POST", "/api/evaluar", '{"version":"v2","modo":"solo-evidencia"}', origin)
@@ -130,5 +135,138 @@ class DemoHTTP(unittest.TestCase):
                 with (patch("assessment.ui.OUTPUT", root),
                       patch("assessment.ui.assess_project", side_effect=ValueError("fallo inesperado"))):
                     self.assertEqual(request("POST", "/api/evaluar", '{"version":"v1","modo":"solo-evidencia"}', origin)[0], 500)
+            finally:
+                server.shutdown()
+
+
+class Logos(unittest.TestCase):
+    def test_sirve_los_logos_y_nada_mas(self):
+        with ThreadingHTTPServer(("127.0.0.1", 0), DemoHandler) as server:
+            Thread(target=server.serve_forever, daemon=True).start()
+            try:
+                def pedir(ruta):
+                    conn = HTTPConnection("127.0.0.1", server.server_port, timeout=10)
+                    conn.request("GET", ruta)
+                    resp = conn.getresponse()
+                    cuerpo = resp.read()
+                    conn.close()
+                    return resp.status, resp.getheader("Content-Type"), cuerpo
+
+                estado, tipo, cuerpo = pedir("/logos/github.svg")
+                self.assertEqual((estado, tipo.split(";")[0]), (200, "image/svg+xml"))
+                self.assertIn(b"<svg", cuerpo)
+                for ruta in ("/logos/no-existe.svg", "/logos/GitHub.svg", "/logos/../app.js", "/logos/..%2Fapp.js",
+                             "/logos/github.svg.bak", "/logos/", "/logos/CREDITOS.md"):
+                    self.assertEqual(pedir(ruta)[0], 404, ruta)
+            finally:
+                server.shutdown()
+
+
+@unittest.skipIf(sync_playwright is None, "Playwright no está instalado")
+class ConsolaEnNavegador(unittest.TestCase):
+    def test_cada_herramienta_de_la_etapa_lleva_su_logo(self):
+        with ThreadingHTTPServer(("127.0.0.1", 0), DemoHandler) as server:
+            Thread(target=server.serve_forever, daemon=True).start()
+            try:
+                with sync_playwright() as pw:
+                    try:
+                        browser = pw.chromium.launch(channel="chrome", headless=True)
+                    except Exception as exc:  # pragma: no cover - sin Google Chrome instalado
+                        self.skipTest(f"Chrome no disponible: {exc}")
+                    page = browser.new_page(viewport={"width": 1440, "height": 900})
+                    page.route("**/api/**", lambda r: r.fulfill(status=200, content_type="application/json", body="{}"))
+                    page.goto(f"http://127.0.0.1:{server.server_port}/")
+                    page.wait_for_function("() => document.querySelectorAll('.stage-tool').length === 9"
+                                           " && [...document.querySelectorAll('.stage-tool img')].every((i) => i.complete)")
+                    filas = page.evaluate("""() => [...document.querySelectorAll('.stage-tool')].map((s) => {
+                        const imgs = [...s.querySelectorAll('img')];
+                        return {texto: s.textContent, logos: imgs.map((i) => i.getAttribute('src')), abbr: Boolean(s.querySelector('abbr')),
+                                cargados: imgs.every((i) => i.naturalWidth > 0), decorativos: imgs.every((i) => i.alt === '')};
+                    })""")
+                    browser.close()
+            finally:
+                server.shutdown()
+        self.assertEqual(filas[1]["texto"], "GitHub + VS Code + Copilot")  # el nombre sigue siendo texto
+        self.assertEqual(filas[1]["logos"], ["/logos/github.svg", "/logos/vscode.svg", "/logos/copilot.svg"])
+        self.assertEqual(filas[2]["logos"], ["/logos/sonarqube.svg", "/logos/trivy.svg", "/logos/codeql.svg", "/logos/dependabot.svg"])
+        self.assertEqual(filas[7]["logos"], ["/logos/ai-foundry.svg"])  # Fabric y Security Copilot no tienen logo oficial
+        self.assertEqual(filas[8]["logos"], ["/logos/azure-devops.svg"])  # la fila «Decisión humana» también es Boards
+        self.assertEqual(sum(len(f["logos"]) for f in filas), 19)
+        self.assertTrue(filas[4]["abbr"])  # «AKS» conserva su glosario
+        self.assertTrue(all(f["cargados"] and f["decorativos"] for f in filas), filas)
+
+    """La consola servida de verdad en Chrome headless; las /api/ se simulan para no tocar integraciones reales."""
+
+    def test_una_linea_larga_de_codigo_no_ensancha_la_consola(self):
+        # Una línea de C# más ancha que la columna se desplaza dentro de su bloque: si ensancha la página,
+        # la consola entera se corre a la izquierda (la demo lo mostró al enfocar la remediación).
+        linea = "var aviso = new Aviso(contrato.Id, contrato.Correo, contrato.Renovacion, dias, contrato.Cliente.Nombre, contrato.Cliente.Segmento);"
+        with ThreadingHTTPServer(("127.0.0.1", 0), DemoHandler) as server:
+            Thread(target=server.serve_forever, daemon=True).start()
+            try:
+                with sync_playwright() as pw:
+                    try:
+                        browser = pw.chromium.launch(channel="chrome", headless=True)
+                    except Exception as exc:  # pragma: no cover - sin Google Chrome instalado
+                        self.skipTest(f"Chrome no disponible: {exc}")
+                    page = browser.new_page(viewport={"width": 1440, "height": 900})
+                    page.route("**/api/**", lambda r: r.fulfill(status=200, content_type="application/json", body="{}"))
+                    page.goto(f"http://127.0.0.1:{server.server_port}/")
+                    medir = """(linea) => {
+                        const card = document.querySelector('article.card');
+                        for (let el = card; el; el = el.parentElement) el.hidden = false;
+                        const rem = card.querySelector('.remediation');
+                        rem.innerHTML = '<div class="rem-panel"><div class="rem-output"><div class="copyable">'
+                          + '<span class="copy"><button class="copy-button" type="button">Copiar C#</button></span>'
+                          + '<pre class="rem-pre" tabindex="0"><code></code></pre></div><p class="rem-disclaimer">nota</p></div></div>';
+                        rem.querySelector('code').textContent = linea;
+                        const caja = (el) => { const b = el.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.right)]; };
+                        const medida = () => ({pagina: document.documentElement.scrollWidth, vista: innerWidth,
+                            pre: caja(rem.querySelector('.rem-pre')), card: caja(card), boton: caja(rem.querySelector('.copy-button')),
+                            bloque: caja(rem.querySelector('.copyable'))});
+                        const conPuntero = medida();
+                        rem.querySelector('.copyable').style.display = 'flex';  // la variante sin hover (pantallas táctiles)
+                        return {conPuntero, tactil: medida()};
+                    }"""
+                    d = page.evaluate(medir, linea)
+                    browser.close()
+            finally:
+                server.shutdown()
+        for variante, m in d.items():
+            self.assertGreater(m["pre"][1] - m["pre"][0], 0, f"{variante}: el bloque no se dibujó: {m}")
+            self.assertLessEqual(m["pagina"], m["vista"], f"{variante}: la línea ensancha la página: {m}")
+            self.assertLessEqual(m["pre"][1], m["card"][1], f"{variante}: el bloque se sale del expediente: {m}")
+            self.assertLessEqual(m["boton"][1], m["bloque"][1], f"{variante}: el botón Copiar queda fuera: {m}")
+
+    def test_consola_elige_el_caso(self):
+        with ThreadingHTTPServer(("127.0.0.1", 0), DemoHandler) as server:
+            Thread(target=server.serve_forever, daemon=True).start()
+            try:
+                with sync_playwright() as pw:
+                    try:
+                        browser = pw.chromium.launch(channel="chrome", headless=True)
+                    except Exception as exc:  # pragma: no cover - sin Google Chrome instalado
+                        self.skipTest(f"Chrome no disponible: {exc}")
+                    page = browser.new_page(viewport={"width": 1440, "height": 900})
+                    page.route("**/api/**", lambda r: r.fulfill(status=200, content_type="application/json", body="{}"))
+                    page.goto(f"http://127.0.0.1:{server.server_port}/")
+                    titulo = page.inner_text("h1#title")
+                    self.assertIn("Evaluador de entregas", page.title())
+                    self.assertEqual(titulo, "Evaluador de entregas")
+                    self.assertNotIn("renovaciones", page.title() + titulo)
+                    boton = page.locator("#case-btn")
+                    self.assertIn("Portal de Contratos · REN-001", boton.inner_text())
+                    boton.click()
+                    self.assertEqual(boton.get_attribute("aria-expanded"), "true")
+                    opciones = page.locator("#case-list [role=option]")
+                    self.assertEqual(opciones.count(), 1)
+                    opciones.first.click()
+                    self.assertEqual(boton.get_attribute("aria-expanded"), "false")
+                    self.assertIn("Un contrato cancelado nunca debe recibir un aviso de renovación.", page.inner_text(".deck-rule"))
+                    boton.click()
+                    page.keyboard.press("Escape")
+                    self.assertEqual(boton.get_attribute("aria-expanded"), "false")
+                    self.assertEqual(page.evaluate("document.activeElement.id"), "case-btn")
+                    browser.close()
             finally:
                 server.shutdown()

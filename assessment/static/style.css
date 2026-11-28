@@ -527,6 +527,137 @@ kbd {
   line-height: 1.5;
 }
 
+/* Caso evaluado: el título nombra el producto y el selector, el caso que se audita */
+.deck-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-4);
+}
+
+.case-picker {
+  position: relative;
+}
+
+.case-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-block-size: 44px;
+  padding-inline: var(--space-3);
+  background-color: var(--surface-sheet);
+  color: var(--ink-primary);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background-color var(--dur-feedback) var(--ease-out-expo), border-color var(--dur-feedback) var(--ease-out-expo);
+}
+
+.case-btn:hover {
+  background-color: var(--surface-well);
+  border-color: var(--action-primary);
+}
+
+.case-btn-label {
+  color: var(--ink-muted);
+  font-weight: 600;
+  padding-inline-end: var(--space-2);
+  border-inline-end: 1px solid var(--border-subtle);
+}
+
+.case-btn .toggle-chevron {
+  margin-inline-start: 0;
+  color: var(--action-primary);
+}
+
+.case-btn[aria-expanded="true"] .toggle-chevron {
+  rotate: 180deg;
+}
+
+.case-list {
+  position: absolute;
+  inset-block-start: calc(100% + 6px);
+  inset-inline-start: 0;
+  z-index: 45;
+  inline-size: 100%;
+  margin: 0;
+  padding: var(--space-2);
+  list-style: none;
+  background-color: var(--surface-sheet);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-md);
+}
+
+.case-option {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  padding: var(--space-3) calc(var(--space-3) + 24px) var(--space-3) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.case-option:hover {
+  background-color: var(--surface-well);
+}
+
+.case-option:focus-visible {
+  outline-width: 2px;
+  outline-offset: -2px;
+}
+
+.case-option[aria-selected="true"] {
+  background-color: var(--surface-tint);
+  border-color: var(--border-strong);
+}
+
+.case-option-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  color: var(--ink-primary);
+}
+
+.case-option-head code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--action-primary);
+  background-color: var(--surface-well);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+
+.case-option-rule {
+  font-size: var(--text-sm);
+  color: var(--ink-secondary);
+  line-height: 1.45;
+}
+
+.case-option-meta {
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.case-option-check {
+  position: absolute;
+  inset-block-start: var(--space-3);
+  inset-inline-end: var(--space-3);
+  color: var(--action-primary);
+  visibility: hidden;
+}
+
+.case-option[aria-selected="true"] .case-option-check {
+  visibility: visible;
+}
+
 .deck-utility {
   display: flex;
   align-items: center;
@@ -1135,6 +1266,13 @@ input:disabled {
   font-size: var(--text-xs);
   line-height: 1.35;
   color: var(--ink-muted);
+}
+.stage-tool .tool { white-space: nowrap; } /* el logo no se separa de su nombre al partir la línea */
+.tool-logo {
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  vertical-align: -2px;
 }
 
 /* One button per cell: the result, its evidence line and any warning */
@@ -1963,6 +2101,7 @@ input:disabled {
   margin: 0;
   flex: 1 1 auto;
   min-inline-size: 0;
+  contain: inline-size; /* una línea larga se desplaza dentro del bloque sin ensanchar ninguna columna */
   overflow-x: auto;
   padding: var(--space-3);
   padding-inline-end: 6.5rem;
