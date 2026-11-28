@@ -395,6 +395,11 @@
     host.style.cssText = "position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:block";
     // Sin la barra de la página: junto a una slide oscura se veía como una franja clara; la demo desplaza sola.
     document.documentElement.style.scrollbarWidth = "none";
+    // Sin tooltips nativos en la consola: Chrome los pinta fuera de la página, quedan en la grabación y tapan el foco.
+    const sinTitle = (n) => { n.removeAttribute?.("title"); n.querySelectorAll?.("[title]").forEach((el) => el.removeAttribute("title")); };
+    sinTitle(document.documentElement);
+    new MutationObserver((cambios) => cambios.forEach((c) => (c.type === "attributes" ? sinTitle(c.target) : c.addedNodes.forEach(sinTitle))))
+      .observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["title"] });
     const sombra = host.attachShadow({ mode: "open" });
     sombra.innerHTML = BASE;
     const css = String(window.__DIRECTOR_CSS || "");

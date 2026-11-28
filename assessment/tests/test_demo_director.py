@@ -73,10 +73,10 @@ class DirectorEnPagina(unittest.TestCase):
         cls.browser.close()
         cls.pw.stop()
 
-    def abrir(self, ancho=1440, alto=900, velocidad=1, gsap=False, movimiento=None):
+    def abrir(self, ancho=1440, alto=900, velocidad=1, gsap=False, movimiento=None, contenido=PAGINA):
         page = self.browser.new_page(viewport={"width": ancho, "height": alto}, reduced_motion=movimiento)
         self.addCleanup(page.close)
-        page.set_content(PAGINA)
+        page.set_content(contenido)
         if gsap:  # el mismo GSAP que inyecta el runner; sin él, el director no anima y nada más cambia
             from demo.__main__ import GSAP
             page.add_script_tag(content=GSAP)
@@ -156,6 +156,20 @@ class DirectorEnPagina(unittest.TestCase):
         # Chrome headless ya oculta las barras (--hide-scrollbars): se comprueba el estilo que las oculta en la ventana real.
         page = self.abrir()
         self.assertEqual(page.evaluate("() => getComputedStyle(document.documentElement).scrollbarWidth"), "none")
+
+    def test_la_consola_no_deja_tooltips_nativos_en_la_grabacion(self):
+        # Chrome pinta el title fuera de la página: en la grabación del 28 nov el de «Solo brechas» quedó unos 9 s
+        # junto al botón y luego sobre la pestaña v3. Ni los de la consola al montar ni los que añade o cambia después.
+        boton = "<button id='brechas' title='Mostrar únicamente etapas con fallos o atención (Atajo: D)'>Solo brechas</button>"
+        page = self.abrir(contenido=PAGINA.replace("<body style='margin:0'>", "<body style='margin:0'>" + boton))
+        page.evaluate("""() => {
+            document.body.insertAdjacentHTML('beforeend', "<p>Etapa 3 <abbr title='Software Composition Analysis'>SCA</abbr></p>");
+            document.querySelector('#objetivo').title = 'puesto después';
+        }""")
+        self.assertEqual(page.evaluate("() => [...document.querySelectorAll('[title]')].map((el) => el.outerHTML)"), [])
+        # La barra del presentador conserva los suyos: explican sus atajos a quien la usa con el ratón.
+        self.assertEqual(page.evaluate(
+            "() => document.querySelector('#demo-director').shadowRoot.querySelector('.b-siguiente').title"), "Siguiente (→)")
 
     def test_en_la_pantalla_de_la_presentacion_ningun_texto_de_slide_queda_bajo_los_subtitulos(self):
         # Pantalla completa del MacBook (bajo la cámara), medida en el recorrido del 28 nov: 1470×923.
