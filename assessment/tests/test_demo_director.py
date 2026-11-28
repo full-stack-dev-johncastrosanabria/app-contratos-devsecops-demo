@@ -157,6 +157,38 @@ class DirectorEnPagina(unittest.TestCase):
         page = self.abrir()
         self.assertEqual(page.evaluate("() => getComputedStyle(document.documentElement).scrollbarWidth"), "none")
 
+    def test_en_la_pantalla_de_la_presentacion_ningun_texto_de_slide_queda_bajo_los_subtitulos(self):
+        # Pantalla completa del MacBook (bajo la cámara), medida en el recorrido del 28 nov: 1470×923.
+        # Cada slide del guion con cada una de sus frases; en la captura de Actions, la imagen sí puede quedar debajo.
+        from demo import guion
+        escenas = guion.cargar(DEMO / "guion.yaml")["escenas"]
+        page = self.abrir(1470, 923, movimiento="reduce")
+        choques = """(sel) => {
+            const raiz = document.querySelector('#demo-director').shadowRoot;
+            const s = raiz.querySelector('.subtitulos').getBoundingClientRect();
+            return [...raiz.querySelectorAll(sel)]
+                .filter((el) => [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()))
+                .filter((el) => { const r = el.getBoundingClientRect();
+                                  return r.bottom > s.top && r.top < s.bottom && r.right > s.left && r.left < s.right; })
+                .map((el) => el.textContent.trim().slice(0, 60));
+        }"""
+        revisadas = 0
+        for paso in [p for e in escenas for p in e.get("pasos") or []]:
+            if paso.get("tipo") != "slide" or paso["plantilla"] in ("app", "reporte", "documento"):
+                continue
+            datos = {c: v for c, v in paso.items() if c not in ("tipo", "plantilla", "voz", "motor", "focos", "informe", "secciones")}
+            sel = ".slide > :not(.membrete), .slide > :not(.membrete) *"
+            if paso["plantilla"] == "captura":
+                datos = {"src": CAPTURA, "ancho": 1600, "alto": 1000, "titulo": "Corrida verde de main · commit a1014f6", **datos}
+                sel = ".s-captura figcaption"
+            page.evaluate("([p, d]) => __director.slide(p, d)", [paso["plantilla"], datos])
+            for frase in guion.lista(paso["voz"]):
+                page.evaluate("(t) => { __director.decir(t, null, 60); }", frase)
+                revisadas += 1
+                with self.subTest(plantilla=paso["plantilla"], frase=frase[:50]):
+                    self.assertEqual(page.evaluate(choques, sel), [])
+        self.assertGreater(revisadas, 10)
+
     def test_pregunta_pone_el_logo_de_cada_fuente(self):
         page = self.abrir()
         page.evaluate("() => __director.slide('pregunta', {pregunta: '¿?', remate: 'r', fuentes: [{nombre: 'GitHub', logo: '/logos/github.svg'}, 'Sin logo']})")

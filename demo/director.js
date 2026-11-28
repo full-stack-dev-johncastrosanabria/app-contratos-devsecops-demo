@@ -866,7 +866,10 @@
         h("p", { class: "escenario" }, h("span", { class: "rotulo" }, "Escenario:"), " ", e.escenario))))),
 
     maf: ({ titulo = "Los agentes investigan; la política decide" }) => h("div", { class: "s-maf" },
-      h("h1", { class: "entra" }, titulo),
+      // La nota va junto al título: al pie, un subtítulo de tres líneas la tapaba en la pantalla de la presentación.
+      h("div", { class: "cabecera" },
+        h("h1", { class: "entra" }, titulo),
+        h("p", { class: "pie entra" }, "Microsoft Agent Framework: tres ramas en paralelo que se reúnen antes del dictamen, con un punto de control para la decisión humana.")),
       h("div", { class: "grafo entra" },
         caja("Recolector de evidencia", "Huella SHA-256 de cada artefacto"),
         conector("abre"),
@@ -877,8 +880,7 @@
         conector("cierra"),
         caja("Política REN-001.v2", "Determinista: emite el dictamen", "politica"),
         conector("recto"),
-        caja("Aprobación humana", "Antes de crear la tarea en Azure Boards", "humano")),
-      h("p", { class: "pie entra" }, "Microsoft Agent Framework: tres ramas en paralelo que se reúnen antes del dictamen, con un punto de control para la decisión humana.")),
+        caja("Aprobación humana", "Antes de crear la tarea en Azure Boards", "humano"))),
 
     etapas: ({ etapas = [], titulo = "Ocho etapas, una sola trazabilidad" }) => h("div", { class: "s-etapas" },
       h("h1", { class: "entra" }, titulo),
