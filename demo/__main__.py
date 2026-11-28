@@ -14,6 +14,7 @@ import re
 import shutil
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -859,12 +860,23 @@ PDF_HTML = """<!doctype html><html lang="es"><meta charset="utf-8"><title>Recorr
 <body>{figuras}</body></html>"""
 
 
+def _tamano(png: Path) -> str:
+    """Ancho×alto de la captura (cabecera IHDR): el tamaño de la vista en que se tomó."""
+    try:
+        with png.open("rb") as f:
+            ancho, alto = struct.unpack(">II", f.read(24)[16:24])
+    except (OSError, struct.error):
+        return "?"
+    return f"{ancho}×{alto}"
+
+
 def armar_pdf(carpeta: Path) -> Path:
-    """Las capturas del recorrido (capturas.jsonl) en un PDF, una por página con su paso, minuto y frase (o el fallo, en rojo)."""
+    """Las capturas del recorrido (capturas.jsonl) en un PDF, una por página con su paso, minuto, tamaño y frase (o el fallo, en rojo)."""
     capturas = [json.loads(l) for l in (carpeta / "capturas.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
     figuras = "".join(
         f'<figure class="{"error" if c["error"] else ""}"><img src="{html.escape(c["archivo"])}" alt="">'
-        f'<figcaption><b>{i}</b><span>{html.escape(c["donde"])} · {int(c["t"] // 60):02d}:{int(c["t"] % 60):02d}</span>'
+        f'<figcaption><b>{i}</b><span>{html.escape(c["donde"])} · {int(c["t"] // 60):02d}:{int(c["t"] % 60):02d}'
+        f' · {_tamano(carpeta / c["archivo"])}</span>'
         f'<span>{html.escape(c["texto"])}</span></figcaption></figure>'
         for i, c in enumerate(capturas, 1))
     pagina = carpeta / "recorrido.html"

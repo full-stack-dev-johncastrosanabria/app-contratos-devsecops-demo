@@ -372,8 +372,8 @@ class PdfDelRecorrido(unittest.TestCase):
         from demo import __main__ as runner
         with tempfile.TemporaryDirectory() as tmp:
             carpeta = Path(tmp)
-            for archivo in ("001.png", "002.png"):
-                (carpeta / archivo).write_bytes(png_liso())
+            (carpeta / "001.png").write_bytes(png_liso())
+            (carpeta / "002.png").write_bytes(png_liso(20, 12))  # la ventana cambió de tamaño a mitad de la corrida
             (carpeta / "capturas.jsonl").write_text("".join(json.dumps(c, ensure_ascii=False) + "\n" for c in [
                 {"archivo": "001.png", "donde": "portada · paso 1", "texto": "Hola <b>ustedes</b>", "error": False, "t": 1.0},
                 {"archivo": "002.png", "donde": "caso · paso 3", "texto": "no apareció «#x»", "error": True, "t": 42.5},
@@ -382,7 +382,11 @@ class PdfDelRecorrido(unittest.TestCase):
             pdf = ruta.read_bytes()
             self.assertTrue(pdf.startswith(b"%PDF"))
             self.assertEqual(len(re.findall(rb"/Type\s*/Page\b(?!s)", pdf)), 2)
-            self.assertIn("Hola &lt;b&gt;ustedes&lt;/b&gt;", (carpeta / "recorrido.html").read_text(encoding="utf-8"))
+            pagina = (carpeta / "recorrido.html").read_text(encoding="utf-8")
+            self.assertIn("Hola &lt;b&gt;ustedes&lt;/b&gt;", pagina)
+            # Cada captura dice a qué tamaño se tomó: así se ve si el recorrido corrió más bajo que la presentación.
+            self.assertIn("16×10", pagina)
+            self.assertIn("20×12", pagina)
 
 
 def png_liso(ancho=16, alto=10) -> bytes:
