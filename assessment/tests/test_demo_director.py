@@ -8,6 +8,15 @@ from unittest import mock
 DEMO = Path(__file__).resolve().parents[2] / "demo"
 PAGINA = "<!doctype html><html lang='es'><body style='margin:0'><input id='campo'><div id='objetivo' style='width:240px;height:80px;margin:300px'>objetivo</div></body></html>"
 ESCENAS = "[{id:'a', titulo:'Escena A'}, {id:'b', titulo:'Escena B'}]"
+# Captura simulada de 1600×1000, como las de GitHub Actions (tamaño natural conocido).
+CAPTURA = ("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1600' height='1000'>"
+           "<rect width='1600' height='1000' fill='%23dde6f3'/></svg>")
+CAJAS_JS = """() => {
+    const raiz = document.querySelector('#demo-director').shadowRoot;
+    const caja = (el) => { const b = el.getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; };
+    return {img: caja(raiz.querySelector('.s-captura img')), b: caja(raiz.querySelector('.caja[data-caja="b"]')),
+            n: raiz.querySelectorAll('.s-captura .caja[data-caja]').length};
+}"""
 
 try:
     from playwright.sync_api import sync_playwright
@@ -182,6 +191,89 @@ class DirectorEnPagina(unittest.TestCase):
                 self.assertTrue(sub[3] <= barra[1] or barra[3] <= sub[1], f"se solapan: {cajas}")
                 for caja in (sub, barra):
                     self.assertTrue(caja[0] >= 0 and caja[1] >= 0 and caja[2] <= ancho and caja[3] <= alto, f"fuera del viewport: {caja}")
+
+
+    def test_app_ocupa_la_pantalla_sin_tapar_la_barra(self):
+        for ancho, alto in ((1440, 900), (1920, 1080)):
+            with self.subTest(viewport=f"{ancho}x{alto}"):
+                page = self.abrir(ancho, alto)
+                page.evaluate("() => __director.slide('app', {url: 'about:blank', titulo: 'Portal de Contratos · v2'})")
+                d = page.evaluate("""() => {
+                    const raiz = document.querySelector('#demo-director').shadowRoot;
+                    const marco = raiz.querySelector('.slide iframe.marco-app');
+                    const url = raiz.querySelector('.s-app .url');
+                    const caja = (el) => { const b = el.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom]; };
+                    return {src: marco.getAttribute('src'), tab: marco.tabIndex, punteros: getComputedStyle(marco).pointerEvents,
+                            titulo: marco.title, marco: caja(marco), ventana: caja(raiz.querySelector('.s-app .navegador')),
+                            url: url.textContent, urlCaja: caja(url),
+                            barra: caja(raiz.querySelector('.barra')), membrete: caja(raiz.querySelector('.membrete'))};
+                }""")
+                # El portal nunca toma el foco ni los punteros: el teclado sigue siendo del director.
+                self.assertEqual((d["src"], d["tab"], d["punteros"], d["titulo"]),
+                                 ("about:blank", -1, "none", "Portal de Contratos · v2"))
+                self.assertEqual(d["url"], "about:blank")
+                izq, arriba, der, abajo = d["ventana"]
+                self.assertLessEqual(abajo, d["barra"][1], f"la barra tapa el portal: {d}")
+                self.assertLessEqual(d["membrete"][3], arriba, f"el membrete pisa el portal: {d}")
+                self.assertGreater(der - izq, 0.9 * ancho)
+                self.assertGreater(d["marco"][3] - d["marco"][1], 0.65 * alto)
+                self.assertTrue(arriba <= d["urlCaja"][1] and d["urlCaja"][3] <= d["marco"][1], f"la URL no se ve sobre el portal: {d}")
+
+    def test_captura_marca_cada_job(self):
+        for ancho, alto in ((1440, 900), (1920, 1080)):
+            with self.subTest(viewport=f"{ancho}x{alto}"):
+                page = self.abrir(ancho, alto)
+                page.evaluate("""(src) => __director.slide('captura', {src, titulo: 'Corrida verde en main', ancho: 1600, alto: 1000,
+                                  cajas: {a: [100, 100, 400, 80], b: [800, 500, 600, 120]}})""", CAPTURA)
+                d = page.evaluate(CAJAS_JS)
+                self.assertEqual(d["n"], 2)
+                ix, iy, iw, ih = d["img"]
+                bx, by, bw, bh = d["b"]
+                k = iw / 1600
+                self.assertAlmostEqual(ih, 1000 * k, delta=2)
+                for real, esperado in ((bx, ix + 800 * k), (by, iy + 500 * k), (bw, 600 * k), (bh, 120 * k)):
+                    self.assertAlmostEqual(real, esperado, delta=2)
+                self.assertTrue(ix <= bx and bx + bw <= ix + iw and iy <= by and by + bh <= iy + ih)
+
+    def test_documento_muestra_el_html_con_formato(self):
+        html = ("<h1>Informe de v2</h1><h2>Matriz de criterios evaluados</h2>"
+                "<table><thead><tr><th>Criterio</th><th>Estado</th></tr></thead>"
+                "<tbody><tr><td>REN-001</td><td><strong>Incumplido</strong></td></tr></tbody></table>")
+        for ancho, alto in ((1440, 900), (1920, 1080)):
+            with self.subTest(viewport=f"{ancho}x{alto}"):
+                page = self.abrir(ancho, alto)
+                page.evaluate("(html) => __director.slide('documento', {titulo: 'informe.md · v2', html})", html)
+                d = page.evaluate("""() => {
+                    const raiz = document.querySelector('#demo-director').shadowRoot;
+                    const caja = (el) => { const b = el.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom]; };
+                    const doc = raiz.querySelector('article.s-documento');
+                    return {tabla: caja(doc.querySelector('table')), negrita: !!doc.querySelector('td strong'),
+                            h1: getComputedStyle(doc.querySelector('h1')).fontSize, barra: caja(raiz.querySelector('.barra'))};
+                }""")
+                self.assertTrue(d["negrita"])
+                izq, arriba, der, abajo = d["tabla"]
+                self.assertTrue(izq >= 0 and arriba >= 0 and der <= ancho, f"la tabla se sale: {d}")
+                self.assertLessEqual(abajo, d["barra"][1], f"la barra tapa la tabla: {d}")
+                self.assertLess(float(d["h1"].rstrip("px")), 48, "el h1 del informe no debe heredar el titular de slide")
+
+    def test_foco_por_caja_sobre_una_slide(self):
+        page = self.abrir()
+        page.evaluate("(src) => __director.slide('captura', {src, titulo: 'x', ancho: 1600, alto: 1000, cajas: {b: [800, 500, 600, 120]}})", CAPTURA)
+        ix, iy, iw, ih = page.evaluate(CAJAS_JS)["img"]
+        bx, by, bw, bh = page.evaluate(CAJAS_JS)["b"]
+        self.assertTrue(page.evaluate("(c) => __director.foco(c)", {"x": bx, "y": by, "width": bw, "height": bh}))
+        page.wait_for_timeout(400)
+        d = page.evaluate("""() => {
+            const raiz = document.querySelector('#demo-director').shadowRoot;
+            const velo = raiz.querySelector('.velo-foco'), hueco = raiz.querySelector('.foco').getBoundingClientRect();
+            return {visible: velo.hasAttribute('data-visible') && !velo.hidden, opacidad: +getComputedStyle(velo).opacity,
+                    zVelo: +getComputedStyle(velo).zIndex, zSlide: +getComputedStyle(raiz.querySelector('.slide')).zIndex,
+                    hueco: [hueco.left, hueco.top, hueco.width, hueco.height]};
+        }""")
+        self.assertTrue(d["visible"] and d["opacidad"] > 0.9, d)
+        self.assertGreater(d["zVelo"], d["zSlide"], "el velo debe quedar sobre la slide")
+        for real, esperado in zip(d["hueco"], (bx, by, bw, bh)):
+            self.assertAlmostEqual(real, esperado, delta=2)
 
 
 if __name__ == "__main__":

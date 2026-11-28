@@ -340,6 +340,8 @@
     falla: '<circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>',
     alerta: '<path d="M10.3 4.2 2.9 17.1A2 2 0 0 0 4.6 20h14.8a2 2 0 0 0 1.7-2.9L13.7 4.2a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4.2M12 16.9v.1"/>',
     flecha: '<path d="M4 12h15M13.5 6.5 19 12l-5.5 5.5"/>',
+    documento: '<path d="M7 3.5h7l4 4v13H7z"/><path d="M14 3.5v4h4M10 12.5h5M10 16h5"/>',
+    globo: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.1 3.6 8.5s-1.2 6.2-3.6 8.5c-2.4-2.3-3.6-5.1-3.6-8.5s1.2-6.2 3.6-8.5Z"/>',
   };
   const iconoSvg = (nombre) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONOS[nombre]}</svg>`;
   const CURSOR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 2.5v16.7l4.6-4.3 3.2 6.7 2.9-1.3-3.1-6.6 6.3-.3z" fill="#ffffff" stroke="#081c3a" stroke-width="1.5" stroke-linejoin="round"/></svg>';
@@ -537,7 +539,7 @@
   }
 
   /* ---------- Foco: recorte que sigue en vivo al objetivo ---------- */
-  const foco = { els: [], desde: null, t0: 0, dur: 0, raf: 0, rect: null };
+  const foco = { els: [], caja: null, desde: null, t0: 0, dur: 0, raf: 0, rect: null };
   const MARGEN_FOCO = 10;
   const lerp = (a, b, k) => a + (b - a) * k;
 
@@ -599,7 +601,7 @@
   }
 
   function seguirFoco(ahora) {
-    const vivo = rectDe(foco.els);
+    const vivo = foco.caja || rectDe(foco.els);
     if (vivo) {
       let r = vivo;
       if (foco.desde) {
@@ -625,26 +627,36 @@
       apagarFoco();
       return true;
     }
-    let els;
-    try {
-      els = [...document.querySelectorAll(selector)];
-    } catch {
-      return false;
+    let els = [];
+    let caja = null;
+    if (typeof selector === "object") {
+      // Caja en coordenadas del viewport (un job dentro de una captura): el hueco calza exacto, sin margen.
+      caja = { x: Number(selector.x), y: Number(selector.y), w: Number(selector.width), h: Number(selector.height) };
+      if (!(caja.w > 0 && caja.h > 0)) return false;
+    } else {
+      try {
+        els = [...document.querySelectorAll(selector)];
+      } catch {
+        return false;
+      }
+      els = els.filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 || r.height > 0;
+      });
+      if (!els.length) return false;
+      await llevarALaVista(els);
     }
-    els = els.filter((el) => {
-      const r = el.getBoundingClientRect();
-      return r.width > 0 || r.height > 0;
-    });
-    if (!els.length) return false;
-    await llevarALaVista(els);
     const yaVisible = ui.veloFoco.hasAttribute("data-visible") && foco.rect;
     foco.desde = yaVisible ? { ...foco.rect } : null;
     foco.els = els;
+    foco.caja = caja;
     foco.t0 = performance.now();
     foco.dur = (reducido() ? 0 : 560) / est.velocidad;
     const etiqueta = opciones && opciones.etiqueta ? String(opciones.etiqueta) : "";
     ui.focoEtiqueta.textContent = etiqueta;
     ui.focoEtiqueta.hidden = !etiqueta;
+    // Sobre una slide (z 30) el velo sube por encima de ella y queda bajo los subtítulos (z 40).
+    ui.veloFoco.toggleAttribute("data-sobre-slide", !ui.slide.hidden);
     ui.veloFoco.hidden = false;
     if (!foco.raf) foco.raf = requestAnimationFrame(seguirFoco);
     requestAnimationFrame(() => ui.veloFoco.setAttribute("data-visible", ""));
@@ -661,6 +673,7 @@
       cancelAnimationFrame(foco.raf);
       foco.raf = 0;
       foco.els = [];
+      foco.caja = null;
       foco.rect = null;
       ui.veloFoco.hidden = true;
     }, 360 / est.velocidad);
@@ -779,6 +792,12 @@
     return el;
   }
   const icono = (nombre) => desdeMarcado(iconoSvg(nombre));
+  function conHtml(clase, html) {
+    const el = document.createElement("div");
+    el.className = clase;
+    el.innerHTML = html; // demo/documento.py ya escapó el texto del informe
+    return el;
+  }
   const monograma = (clase) => desdeMarcado(MONOGRAMA, clase);
   const TONO_ICONO = { pass: "ok", fail: "falla", warn: "alerta" };
 
@@ -819,7 +838,7 @@
         caja("Recolector de evidencia", "Huella SHA-256 de cada artefacto"),
         conector("abre"),
         h("div", { class: "agentes" },
-          caja("QA de renovaciones", "Agente en Azure AI Foundry"),
+          caja("QA funcional", "Agente en Azure AI Foundry"),
           caja("Seguridad y operación", "Agente en Azure AI Foundry"),
           caja("SRE, analítica y gobierno", "Agente en Azure AI Foundry")),
         conector("cierra"),
@@ -849,6 +868,28 @@
     // Power BI insertado: el iframe no toma foco ni punteros, así el teclado sigue siendo de la demo.
     reporte: ({ url, titulo = "Reporte de Power BI" }) => h("div", { class: "s-reporte" },
       h("iframe", { class: "marco-reporte entra", src: url, title: titulo, tabindex: "-1" })),
+
+    // Portal en vivo dentro de un marco de navegador; como el reporte, no toma foco ni punteros (Playwright actúa por eventos).
+    app: ({ url, titulo = "Portal de Contratos" }) => h("div", { class: "s-app" },
+      h("div", { class: "navegador entra" },
+        h("div", { class: "cromo" }, icono("globo"), h("span", { class: "url" }, url)),
+        h("iframe", { class: "marco-app", src: url, title: titulo, tabindex: "-1" }))),
+
+    // Captura con una capa por caja, en % del tamaño natural: el foco toma sus rectángulos ya escalados.
+    captura: ({ src, titulo, ancho = 1600, alto = 1000, cajas = {} }) => h("figure", { class: "s-captura" },
+      h("div", { class: "area" },
+        h("div", { class: "lienzo entra", style: `--proporcion:${ancho / alto}` },
+          h("img", { src, alt: titulo || "", width: ancho, height: alto }),
+          Object.entries(cajas).map(([nombre, [x, y, w, a]]) => h("span", {
+            class: "caja",
+            "data-caja": nombre,
+            style: `left:${(x / ancho) * 100}%;top:${(y / alto) * 100}%;width:${(w / ancho) * 100}%;height:${(a / alto) * 100}%`,
+          })))),
+      titulo && h("figcaption", { class: "entra" }, titulo)),
+
+    documento: ({ titulo, html = "" }) => h("article", { class: "s-documento entra" },
+      titulo && h("p", { class: "doc-titulo" }, icono("documento"), h("span", {}, titulo)),
+      conHtml("doc-cuerpo", html)),
 
     cierre: ({ tesis = [], cta }) => h("div", { class: "s-cierre" },
       h("ul", { class: "tesis" }, tesis.map((t) => h("li", { class: "entra" }, h("span", { class: "nodo" }), h("p", {}, t)))),
