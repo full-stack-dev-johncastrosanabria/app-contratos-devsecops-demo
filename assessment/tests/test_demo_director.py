@@ -171,6 +171,16 @@ class DirectorEnPagina(unittest.TestCase):
         self.assertEqual(page.evaluate(
             "() => document.querySelector('#demo-director').shadowRoot.querySelector('.b-siguiente').title"), "Siguiente (→)")
 
+    def test_esc_no_llega_a_la_consola(self):
+        # En la consola, Esc dos veces cancela la evaluación en vivo y una cierra el inspector de etapa que el guion enfoca.
+        page = self.abrir()
+        page.evaluate("() => { window.__esc = 0; document.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.__esc++; }); }")
+        page.keyboard.press("Escape")
+        page.keyboard.press("Escape")
+        page.focus("#campo")  # tampoco desde un campo de texto: la consola atiende Esc antes de mirar el foco
+        page.keyboard.press("Escape")
+        self.assertEqual(page.evaluate("() => window.__esc"), 0)
+
     def test_en_la_pantalla_de_la_presentacion_ningun_texto_de_slide_queda_bajo_los_subtitulos(self):
         # Pantalla completa del MacBook (bajo la cámara), medida en el recorrido del 28 nov: 1470×923.
         # Cada slide del guion con cada una de sus frases; en la captura de Actions, la imagen sí puede quedar debajo.

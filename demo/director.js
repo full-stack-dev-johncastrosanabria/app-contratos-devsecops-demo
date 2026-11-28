@@ -327,6 +327,11 @@
 
   window.addEventListener("keydown", (e) => {
     if (!est.activo || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "Escape") {  // nunca llega a la consola: dos seguidos cancelan la evaluación en vivo y uno cierra el inspector enfocado
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     const accion = TECLAS[e.key];
     if (!accion || esEditable(e.composedPath()[0])) return;
     e.preventDefault();
