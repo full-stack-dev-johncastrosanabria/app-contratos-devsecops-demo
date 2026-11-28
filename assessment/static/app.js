@@ -3557,6 +3557,11 @@ loadLatestBtn.addEventListener("click", () => restoreCachedRuns({ stamp: true })
 // Global Keyboard Accelerators
 // Esc peels the topmost layer first; stopping a paid run needs a second Esc within 3 s.
 function handleEscape(event) {
+  if (!caseList.hidden) {
+    event.preventDefault();
+    setCaseListOpen(false, { restore: true });
+    return;
+  }
   if (!stageInspector.hidden) {
     event.preventDefault();
     closeStageInspector();
@@ -3596,7 +3601,7 @@ document.addEventListener("keydown", (event) => {
   }
 
   const tag = document.activeElement?.tagName;
-  if (!shortcutsEnabled || tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || event.metaKey || event.ctrlKey || event.altKey) {
+  if (!shortcutsEnabled || !caseList.hidden || tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || event.metaKey || event.ctrlKey || event.altKey) {
     return;
   }
 
@@ -3704,5 +3709,94 @@ async function initEcosystem() {
     reportEcosystemFailure(describeFetchError(err, "No se pudo cargar el estado inicial."));
   }
 }
+
+// Casos que la consola sabe evaluar. Hoy hay uno; cada caso nuevo se agrega aquí.
+const CASOS = [
+  {
+    id: "contratos-ren-001",
+    nombre: "Portal de Contratos",
+    regla: "REN-001",
+    enunciado: "Un contrato cancelado nunca debe recibir un aviso de renovación.",
+    entregas: ["v1", "v2", "v3"],
+  },
+];
+const caseBtn = document.querySelector("#case-btn");
+const caseBtnName = document.querySelector("#case-btn-name");
+const caseList = document.querySelector("#case-list");
+const caseRuleId = document.querySelector("#case-rule-id");
+const caseRuleText = document.querySelector("#case-rule-text");
+let activeCase = CASOS[0];
+
+const caseOptions = () => [...caseList.querySelectorAll('[role="option"]')];
+
+function renderCaseList() {
+  caseList.replaceChildren(...CASOS.map((caso) => {
+    const option = element("li", null, "case-option");
+    option.id = `case-opt-${caso.id}`;
+    option.setAttribute("role", "option");
+    option.tabIndex = -1;
+    option.dataset.caso = caso.id;
+    const head = element("span", null, "case-option-head");
+    head.append(element("strong", caso.nombre), element("code", caso.regla));
+    const check = svgIcon("pass", 14);
+    check.classList.add("case-option-check");
+    option.append(head, element("span", caso.enunciado, "case-option-rule"),
+      element("span", `Entregas ${caso.entregas.join(" · ")}`, "case-option-meta"), check);
+    return option;
+  }));
+  for (const option of caseOptions()) option.setAttribute("aria-selected", String(option.dataset.caso === activeCase.id));
+}
+
+function setCaseListOpen(open, { restore = false } = {}) {
+  caseList.hidden = !open;
+  caseBtn.setAttribute("aria-expanded", String(open));
+  if (open) {
+    (caseOptions().find((option) => option.dataset.caso === activeCase.id) || caseOptions()[0])?.focus();
+    animateIn(caseList, { dy: -4, duration: 160 });
+  } else if (restore) {
+    caseBtn.focus();
+  }
+}
+
+function chooseCase(id) {
+  activeCase = CASOS.find((caso) => caso.id === id) || activeCase;
+  caseBtnName.textContent = `${activeCase.nombre} · ${activeCase.regla}`;
+  caseRuleId.textContent = activeCase.regla;
+  caseRuleText.textContent = activeCase.enunciado;
+  renderCaseList();
+  setCaseListOpen(false, { restore: true });
+}
+
+caseBtn.addEventListener("click", () => setCaseListOpen(caseList.hidden));
+caseBtn.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown" && caseList.hidden) {
+    event.preventDefault();
+    setCaseListOpen(true);
+  }
+});
+caseList.addEventListener("click", (event) => {
+  const option = event.target.closest('[role="option"]');
+  if (option) chooseCase(option.dataset.caso);
+});
+caseList.addEventListener("keydown", (event) => {
+  const options = caseOptions();
+  const i = options.indexOf(document.activeElement);
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    options[(i + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length]?.focus();
+  } else if (event.key === "Home" || event.key === "End") {
+    event.preventDefault();
+    options[event.key === "Home" ? 0 : options.length - 1]?.focus();
+  } else if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    if (options[i]) chooseCase(options[i].dataset.caso);
+  } else if (event.key === "Tab") {
+    setCaseListOpen(false);
+  }
+});
+document.addEventListener("pointerdown", (event) => {
+  if (!caseList.hidden && !event.target.closest(".case-picker")) setCaseListOpen(false);
+});
+renderCaseList();
 
 initEcosystem();

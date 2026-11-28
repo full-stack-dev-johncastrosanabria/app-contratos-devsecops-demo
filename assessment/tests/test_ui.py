@@ -9,6 +9,11 @@ from unittest.mock import patch
 
 from assessment.ui import DemoHandler
 
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:  # pragma: no cover - el venv de la demo la instala
+    sync_playwright = None
+
 
 class DemoHTTP(unittest.TestCase):
     def test_local_web_contract(self):
@@ -45,7 +50,7 @@ class DemoHTTP(unittest.TestCase):
             try:
                 with (patch("assessment.ui.OUTPUT", root),
                       patch("assessment.ui.assess_project", return_value=report) as assess):
-                    self.assertIn(b'Evaluador de renovaciones', request("GET", "/")[1])
+                    self.assertIn(b'Evaluador de entregas', request("GET", "/")[1])
                     self.assertEqual(request("POST", "/api/evaluar", "{}")[0], 403)
                     self.assertEqual(request("POST", "/api/evaluar", '{"version":"../v2","modo":"agente"}', origin)[0], 400)
                     status, body = request("POST", "/api/evaluar", '{"version":"v2","modo":"solo-evidencia"}', origin)
@@ -130,5 +135,43 @@ class DemoHTTP(unittest.TestCase):
                 with (patch("assessment.ui.OUTPUT", root),
                       patch("assessment.ui.assess_project", side_effect=ValueError("fallo inesperado"))):
                     self.assertEqual(request("POST", "/api/evaluar", '{"version":"v1","modo":"solo-evidencia"}', origin)[0], 500)
+            finally:
+                server.shutdown()
+
+
+@unittest.skipIf(sync_playwright is None, "Playwright no está instalado")
+class ConsolaEnNavegador(unittest.TestCase):
+    """La consola servida de verdad en Chrome headless; las /api/ se simulan para no tocar integraciones reales."""
+
+    def test_consola_elige_el_caso(self):
+        with ThreadingHTTPServer(("127.0.0.1", 0), DemoHandler) as server:
+            Thread(target=server.serve_forever, daemon=True).start()
+            try:
+                with sync_playwright() as pw:
+                    try:
+                        browser = pw.chromium.launch(channel="chrome", headless=True)
+                    except Exception as exc:  # pragma: no cover - sin Google Chrome instalado
+                        self.skipTest(f"Chrome no disponible: {exc}")
+                    page = browser.new_page(viewport={"width": 1440, "height": 900})
+                    page.route("**/api/**", lambda r: r.fulfill(status=200, content_type="application/json", body="{}"))
+                    page.goto(f"http://127.0.0.1:{server.server_port}/")
+                    titulo = page.inner_text("h1#title")
+                    self.assertIn("Evaluador de entregas", page.title())
+                    self.assertEqual(titulo, "Evaluador de entregas")
+                    self.assertNotIn("renovaciones", page.title() + titulo)
+                    boton = page.locator("#case-btn")
+                    self.assertIn("Portal de Contratos · REN-001", boton.inner_text())
+                    boton.click()
+                    self.assertEqual(boton.get_attribute("aria-expanded"), "true")
+                    opciones = page.locator("#case-list [role=option]")
+                    self.assertEqual(opciones.count(), 1)
+                    opciones.first.click()
+                    self.assertEqual(boton.get_attribute("aria-expanded"), "false")
+                    self.assertIn("Un contrato cancelado nunca debe recibir un aviso de renovación.", page.inner_text(".deck-rule"))
+                    boton.click()
+                    page.keyboard.press("Escape")
+                    self.assertEqual(boton.get_attribute("aria-expanded"), "false")
+                    self.assertEqual(page.evaluate("document.activeElement.id"), "case-btn")
+                    browser.close()
             finally:
                 server.shutdown()

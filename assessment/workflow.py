@@ -226,7 +226,7 @@ async def investigate(evidence: Evidence, tests: list[SourceTest], devsecops_dat
             model_client = _build_model_client(provider, config)
             async with model_client as client:
                 agent = client.as_agent(
-                    name="QA de renovaciones",
+                    name="QA funcional",
                     instructions=(
                         "Investigá el criterio que se te da. "
                         "Invocá primero las herramientas sin emitir texto ni anuncios previos; "
