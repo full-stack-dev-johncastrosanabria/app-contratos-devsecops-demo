@@ -5,6 +5,7 @@ Reinicia el entorno, hace la revisión previa, abre Chrome con el director inyec
 import argparse
 import base64
 import ctypes
+import html
 from datetime import datetime, timezone
 import json
 import os
@@ -42,6 +43,11 @@ ATAJOS_APAGADOS = 'try { localStorage.setItem("nextgen.atajos", "off"); } catch 
 # GSAP 3.15.1 para las animaciones del director (licencia en demo/vendor/LICENCIA.md). add_init_script corre en
 # cada marco; el reporte de Power BI y el portal no lo necesitan, así que solo se define en el principal.
 GSAP = "if (window.top === window) {\n" + (DEMO / "vendor" / "gsap.min.js").read_text(encoding="utf-8") + "\n}"
+
+# Una frase en la página: devuelve los segundos de demo que tomó, respiro incluido.
+LINEA = ("async ([t, u, d, r]) => { const e = __director.estado(), a = e.transcurrido_s;"
+         " await __director.decir(t, u, d, r[String(e.velocidad)] || 0); return __director.estado().transcurrido_s - a; }")
+CAPTURA_S = 0.8  # segundos de contenido tras el inicio de la frase: el foco (0,56 s) y la entrada de la slide ya terminaron
 
 # La demo enseña el reporte y el portal en sus propias slides: las pestañas que abre la consola le quitarían la pantalla.
 SIN_VENTANAS = ('(() => { const abrir = window.open, propias = ["nextgen_powerbi_web", "nextgen_sandbox_5080"];'
@@ -428,6 +434,8 @@ class Corrida:
         self.inquilino: str | None = None  # tenant de Entra para insertar el reporte de Power BI
         self.actions: dict = {}  # captura de GitHub Actions de la revisión previa: src, ancho, alto, cajas y titulo
         self.marco = None  # Frame del portal :5080 mientras hay un paso «app» abierto: clic, narrar y esperar van dentro
+        self.carpeta: Path | None = None  # con --sin-voz: una captura por frase y por fallo, para el PDF del recorrido
+        self.capturas: list[dict] = []
 
     def previsto(self) -> dict[str, float]:
         """Total estimado por velocidad: las opcionales suenan mientras el total no pase de LIMITE_S."""
@@ -462,6 +470,17 @@ class Corrida:
     def fallo(self, texto: str) -> None:
         self.fallos.append(f"{self.donde}: {texto}")
         _aviso(f"{self.donde}: {texto}")
+        self.capturar(texto, error=True)
+
+    def capturar(self, texto: str, error: bool = False) -> None:
+        if self.carpeta is None or self.page is None:
+            return
+        archivo = f"{len(self.capturas) + 1:03d}.png"
+        try:
+            self.page.screenshot(path=str(self.carpeta / archivo), scale="css")
+        except ErrorPlaywright:
+            return  # la ventana se cerró: el PDF sale con las capturas que haya
+        self.capturas.append({"archivo": archivo, "donde": self.donde, "texto": texto, "error": error, "t": self.total_s})
 
     def recorrer(self) -> None:
         for i, escena in enumerate(self.escenas):
@@ -483,11 +502,16 @@ class Corrida:
             clip = self.clips[texto]
             url = None if self.sin_voz or not clip["archivo"] else f"{CONSOLA}/__demo/voz/{clip['archivo'].name}"
             # El respiro se elige en la página por la velocidad en curso, que el presentador puede cambiar.
-            fila["narracion_s"] += self.js(
-                "async ([t, u, d, r]) => { const e = __director.estado(), a = e.transcurrido_s;"
-                " await __director.decir(t, u, d, r[String(e.velocidad)] || 0); return __director.estado().transcurrido_s - a; }",
-                [texto, url, clip["duracion"], {str(v): s for v, s in guion.RESPIRO_S.items()}],
-            )
+            linea = [texto, url, clip["duracion"], {str(v): s for v, s in guion.RESPIRO_S.items()}]
+            if self.carpeta is None:
+                fila["narracion_s"] += self.js(LINEA, linea)
+                continue
+            # Recorrido con capturas: a mitad de la frase, con su subtítulo y las transiciones ya quietas, sin alargarla.
+            self.js(f"(a) => {{ window.__demoLinea = ({LINEA})(a); }}", linea)
+            espera_s = min(CAPTURA_S, clip["duracion"] / 2) / self.estado()["velocidad"]
+            self.page.wait_for_timeout(1000 * espera_s)
+            self.capturar(texto)
+            fila["narracion_s"] += self.js("() => window.__demoLinea")
 
     def objetivo(self, selector: str):
         """El primer elemento del selector, ya en pantalla, y su caja; (None, None) si no aparece."""
@@ -819,12 +843,47 @@ def escribir_registro(corrida: Corrida, args, sello: str, grabacion: Path | None
     return ruta
 
 
+PDF_HTML = """<!doctype html><html lang="es"><meta charset="utf-8"><title>Recorrido de la demo</title>
+<style>
+  @page { size: 1440px 1010px; margin: 0; }
+  body { margin: 0; font: 15px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; color: #0d2b59; }
+  figure { display: flex; flex-direction: column; height: 1010px; margin: 0; break-after: page; }
+  img { display: block; width: 1440px; height: 900px; object-fit: contain; background: #081c3a; }
+  figcaption { display: grid; grid-template-columns: 56px 300px 1fr; gap: 16px; padding: 16px 24px; }
+  figcaption span:nth-child(2) { color: #4a6283; }
+  .error figcaption { background: #fde8e8; color: #8a1c1c; }
+</style>
+<body>{figuras}</body></html>"""
+
+
+def armar_pdf(carpeta: Path, capturas: list[dict]) -> Path:
+    """Las capturas del recorrido en un PDF, una por página con su paso, minuto y frase (o el fallo, en rojo)."""
+    figuras = "".join(
+        f'<figure class="{"error" if c["error"] else ""}"><img src="{html.escape(c["archivo"])}" alt="">'
+        f'<figcaption><b>{i}</b><span>{html.escape(c["donde"])} · {int(c["t"] // 60):02d}:{int(c["t"] % 60):02d}</span>'
+        f'<span>{html.escape(c["texto"])}</span></figcaption></figure>'
+        for i, c in enumerate(capturas, 1))
+    pagina = carpeta / "recorrido.html"
+    pagina.write_text(PDF_HTML.replace("{figuras}", figuras), encoding="utf-8")
+    ruta = carpeta / "recorrido.pdf"
+    with sync_playwright() as pw:  # después de presentar(): Playwright síncrono no se anida
+        navegador = pw.chromium.launch(channel="chrome", headless=True)
+        try:
+            pestana = navegador.new_page()
+            pestana.goto(pagina.as_uri(), wait_until="load")
+            pestana.pdf(path=str(ruta), width="1440px", height="1010px", print_background=True)
+        finally:
+            navegador.close()
+    return ruta
+
+
 def _argumentos(argv: list[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="python -m demo", description="Demo narrada de la consola NextGen DevSecOps (REN-001).")
     p.add_argument("--velocidad", type=float, choices=(0.75, 1.0, 1.25), default=1.0, help="velocidad inicial; en vivo, < y >")
     p.add_argument("--paso-a-paso", action="store_true", help="espera «Siguiente» (→ o N) en cada escena")
     p.add_argument("--motor", choices=guion.MOTORES, default="agente", help="motor de la evaluación")
-    p.add_argument("--sin-voz", action="store_true", help="solo subtítulos, sin audio")
+    p.add_argument("--sin-voz", action="store_true",
+                   help="solo subtítulos, sin audio; guarda una captura por frase y un PDF del recorrido en demo/.registro")
     p.add_argument("--sin-grabar", action="store_true", help="no grabar pantalla y audio en ~/Movies")
     p.add_argument("--ensayo", action="store_true",
                    help="recorrido rápido (×6, solo evidencia, sin audio ni grabación); genera los clips que falten salvo con --sin-voz")
@@ -884,6 +943,9 @@ def main(argv: list[str] | None = None) -> int:
                 _aviso("Sin permiso de Grabación de pantalla para esta terminal: la demo no se grabará "
                        "(Ajustes del Sistema → Privacidad y seguridad → Grabación de pantalla y audio del sistema)")
         corrida = Corrida(g, clips, args.sin_voz or args.ensayo, args.ensayo)
+        if args.sin_voz:  # recorrido de revisión: capturas para encontrar errores y lo que podría verse mejor
+            corrida.carpeta = REGISTROS / sello
+            corrida.carpeta.mkdir(parents=True, exist_ok=True)
         corrida.inquilino, corrida.actions = inquilino, captura_actions
         print("Presentando · Espacio pausa · → siguiente · < > velocidad · P paso a paso · Q Q terminar", flush=True)
         presentar(corrida, VELOCIDAD_ENSAYO if args.ensayo else args.velocidad, args.paso_a_paso, args.ventana, grabacion)
@@ -909,6 +971,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Registro de tiempos: {escribir_registro(corrida, args, sello, grabacion).relative_to(REPO)}", flush=True)
         if grabacion and grabacion.is_file():
             print(f"Grabación: {grabacion}", flush=True)
+        if corrida and corrida.capturas:
+            try:
+                print(f"Capturas del recorrido: {armar_pdf(corrida.carpeta, corrida.capturas).relative_to(REPO)}", flush=True)
+            except ErrorPlaywright as exc:
+                _aviso(f"No se pudo armar el PDF ({exc}); las capturas quedan en {corrida.carpeta.relative_to(REPO)}")
     return codigo
 
 

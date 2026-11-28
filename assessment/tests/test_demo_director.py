@@ -560,6 +560,37 @@ class DirectorEnPagina(unittest.TestCase):
         self.assertEqual([page.evaluate("() => typeof window.gsap"), marco.evaluate("() => typeof window.gsap")],
                          ["object", "undefined"])
 
+    # ---------- Recorrido sin voz: capturas y PDF ----------
+
+    def test_sin_voz_captura_cada_frase_en_pantalla_sin_alargarla(self):
+        from demo import __main__ as runner
+        page = self.abrir()
+        corrida = runner.Corrida({"escenas": []}, {"hola": {"archivo": None, "duracion": 1.0}}, sin_voz=True, ensayo=False)
+        corrida.page = page
+        subtitulo = "() => document.querySelector('#demo-director').shadowRoot.querySelector('.subtitulos').textContent"
+        en_pantalla = []
+        tomar = page.screenshot
+        page.screenshot = lambda **kw: en_pantalla.append(page.evaluate(subtitulo)) or tomar(**kw)
+        with tempfile.TemporaryDirectory() as tmp:
+            corrida.carpeta = Path(tmp)
+            corrida.donde = "pregunta · paso 1"
+            fila = {"narracion_s": 0.0}
+            corrida.decir("hola", fila)
+            self.assertEqual(en_pantalla, ["hola"])  # a mitad de la frase, con su subtítulo
+            self.assertAlmostEqual(fila["narracion_s"], 1.3, delta=0.2)  # 1 s de frase + 0,3 de respiro, sin espera extra
+            with mock.patch.object(runner, "_aviso"):
+                corrida.fallo("no apareció «#x»")
+            self.assertEqual([(c["donde"], c["texto"], c["error"]) for c in corrida.capturas],
+                             [("pregunta · paso 1", "hola", False), ("pregunta · paso 1", "no apareció «#x»", True)])
+            self.assertTrue(all((Path(tmp) / c["archivo"]).is_file() for c in corrida.capturas))
+
+    def test_sin_carpeta_no_captura(self):
+        from demo import __main__ as runner
+        page = self.abrir()
+        corrida = runner.Corrida({"escenas": []}, {"hola": {"archivo": None, "duracion": 0.2}}, sin_voz=True, ensayo=False)
+        corrida.page = page
+        corrida.decir("hola", {"narracion_s": 0.0})
+        self.assertEqual(corrida.capturas, [])
 
 if __name__ == "__main__":
     unittest.main()

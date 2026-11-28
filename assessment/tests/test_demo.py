@@ -1,6 +1,8 @@
 from copy import deepcopy
 import json
+import shutil
 from pathlib import Path
+import struct
 import subprocess
 import sys
 import tempfile
@@ -358,6 +360,36 @@ class Respiro(unittest.TestCase):
         g = guion.cargar(Path(__file__).resolve().parents[2] / "demo" / "guion.yaml")
         esperas = [p for e in g["escenas"] for p in e["pasos"] if p["tipo"] == "esperar" and p.get("agentes")]
         self.assertEqual([p.get("motor") for p in esperas], ["agente"])
+
+
+class PdfDelRecorrido(unittest.TestCase):
+    """Fuera de las clases con navegador: Playwright síncrono no se anida y armar_pdf abre el suyo."""
+
+    @unittest.skipIf(shutil.which("google-chrome") is None and not Path("/Applications/Google Chrome.app").exists(), "sin Chrome")
+    def test_pdf_del_recorrido_una_pagina_por_captura(self):
+        import re
+        from demo import __main__ as runner
+        with tempfile.TemporaryDirectory() as tmp:
+            carpeta = Path(tmp)
+            for archivo in ("001.png", "002.png"):
+                (carpeta / archivo).write_bytes(png_liso())
+            ruta = runner.armar_pdf(carpeta, [
+                {"archivo": "001.png", "donde": "portada · paso 1", "texto": "Hola <b>ustedes</b>", "error": False, "t": 1.0},
+                {"archivo": "002.png", "donde": "caso · paso 3", "texto": "no apareció «#x»", "error": True, "t": 42.5},
+            ])
+            pdf = ruta.read_bytes()
+            self.assertTrue(pdf.startswith(b"%PDF"))
+            self.assertEqual(len(re.findall(rb"/Type\s*/Page\b(?!s)", pdf)), 2)
+            self.assertIn("Hola &lt;b&gt;ustedes&lt;/b&gt;", (carpeta / "recorrido.html").read_text(encoding="utf-8"))
+
+
+def png_liso(ancho=16, alto=10) -> bytes:
+    """PNG azul marino mínimo, para probar el PDF sin tomar capturas."""
+    import zlib
+    trozo = lambda tipo, datos: struct.pack(">I", len(datos)) + tipo + datos + struct.pack(">I", zlib.crc32(tipo + datos))
+    filas = (b"\x00" + b"\x08\x1c\x3a" * ancho) * alto
+    return (b"\x89PNG\r\n\x1a\n" + trozo(b"IHDR", struct.pack(">IIBBBBB", ancho, alto, 8, 2, 0, 0, 0))
+            + trozo(b"IDAT", zlib.compress(filas)) + trozo(b"IEND", b""))
 
 
 class Grabacion(unittest.TestCase):

@@ -220,13 +220,19 @@ assessment/.venv/bin/python -m demo --ensayo --sin-voz --ventana
 ```
 Recorre todo a ×6 con el motor «solo evidencia» en una ventana de 1440×900 y termina con «Ensayo terminado: N fallos de selectores o esperas». Sin `--sin-voz`, el ensayo además genera los clips de voz que falten.
 
+### Recorrido de revisión (capturas y PDF)
+```bash
+assessment/.venv/bin/python -m demo --sin-voz --sin-grabar --ventana
+```
+Con `--sin-voz`, la demo toma una captura a mitad de cada frase, con su subtítulo en pantalla, y otra por cada fallo. Al final arma `demo/.registro/<fecha>/recorrido.pdf`: una captura por página con su paso, el minuto y la frase, y los fallos en rojo. Sirve para encontrar errores y lo que podría verse mejor sin gastar clips de voz. Las capturas no alargan las frases.
+
 ### En vivo
 ```bash
 assessment/.venv/bin/python -m demo                          # pantalla completa, agentes MAF, voz y grabación en ~/Movies
 assessment/.venv/bin/python -m demo --velocidad 1.25         # velocidad inicial: 0.75, 1 o 1.25
 assessment/.venv/bin/python -m demo --motor solo-evidencia   # plan B: sin modelo ni tokens
 ```
-Otras opciones: `--paso-a-paso` (espera «Siguiente» en cada escena), `--sin-voz` (solo subtítulos), `--sin-grabar` y `--ventana`. Si la consola no está en marcha en `:8050`, la demo la lanza y la apaga al final.
+Otras opciones: `--paso-a-paso` (espera «Siguiente» en cada escena), `--sin-voz` (solo subtítulos, con capturas y PDF), `--sin-grabar` y `--ventana`. Si la consola no está en marcha en `:8050`, la demo la lanza y la apaga al final.
 
 | Tecla | Acción |
 |---|---|
