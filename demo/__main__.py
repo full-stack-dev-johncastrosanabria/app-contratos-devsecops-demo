@@ -480,7 +480,10 @@ class Corrida:
             self.page.screenshot(path=str(self.carpeta / archivo), scale="css")
         except ErrorPlaywright:
             return  # la ventana se cerró: el PDF sale con las capturas que haya
-        self.capturas.append({"archivo": archivo, "donde": self.donde, "texto": texto, "error": error, "t": self.total_s})
+        captura = {"archivo": archivo, "donde": self.donde, "texto": texto, "error": error, "t": self.total_s}
+        self.capturas.append(captura)
+        with (self.carpeta / "capturas.jsonl").open("a", encoding="utf-8") as f:  # al tomarla: si la corrida se corta, el PDF sale igual
+            f.write(json.dumps(captura, ensure_ascii=False) + "\n")
 
     def recorrer(self) -> None:
         for i, escena in enumerate(self.escenas):
@@ -856,8 +859,9 @@ PDF_HTML = """<!doctype html><html lang="es"><meta charset="utf-8"><title>Recorr
 <body>{figuras}</body></html>"""
 
 
-def armar_pdf(carpeta: Path, capturas: list[dict]) -> Path:
-    """Las capturas del recorrido en un PDF, una por página con su paso, minuto y frase (o el fallo, en rojo)."""
+def armar_pdf(carpeta: Path) -> Path:
+    """Las capturas del recorrido (capturas.jsonl) en un PDF, una por página con su paso, minuto y frase (o el fallo, en rojo)."""
+    capturas = [json.loads(l) for l in (carpeta / "capturas.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
     figuras = "".join(
         f'<figure class="{"error" if c["error"] else ""}"><img src="{html.escape(c["archivo"])}" alt="">'
         f'<figcaption><b>{i}</b><span>{html.escape(c["donde"])} · {int(c["t"] // 60):02d}:{int(c["t"] % 60):02d}</span>'
@@ -896,6 +900,12 @@ def _argumentos(argv: list[str] | None) -> argparse.Namespace:
 
 def _como_ctrl_c(_signum, _frame):
     raise KeyboardInterrupt
+
+
+def proteger_restauracion() -> None:
+    """Ya restaurando, ni un segundo Ctrl+C, ni un kill, ni cerrar la terminal la dejan a medias."""
+    for corte in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(corte, signal.SIG_IGN)
 
 
 def atrapar_cortes() -> None:
@@ -965,7 +975,7 @@ def main(argv: list[str] | None = None) -> int:
         print("\nLa ventana de la demo se cerró.", flush=True)
         codigo = 0
     finally:
-        signal.signal(signal.SIGINT, signal.SIG_IGN)  # un segundo Ctrl+C no corta la restauración
+        proteger_restauracion()
         limpiar(consola, tocado)
         if corrida and corrida.filas:
             print(f"Registro de tiempos: {escribir_registro(corrida, args, sello, grabacion).relative_to(REPO)}", flush=True)
@@ -973,7 +983,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Grabación: {grabacion}", flush=True)
         if corrida and corrida.capturas:
             try:
-                print(f"Capturas del recorrido: {armar_pdf(corrida.carpeta, corrida.capturas).relative_to(REPO)}", flush=True)
+                print(f"Capturas del recorrido: {armar_pdf(corrida.carpeta).relative_to(REPO)}", flush=True)
             except ErrorPlaywright as exc:
                 _aviso(f"No se pudo armar el PDF ({exc}); las capturas quedan en {corrida.carpeta.relative_to(REPO)}")
     return codigo

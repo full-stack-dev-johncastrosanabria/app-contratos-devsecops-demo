@@ -583,6 +583,9 @@ class DirectorEnPagina(unittest.TestCase):
             self.assertEqual([(c["donde"], c["texto"], c["error"]) for c in corrida.capturas],
                              [("pregunta · paso 1", "hola", False), ("pregunta · paso 1", "no apareció «#x»", True)])
             self.assertTrue(all((Path(tmp) / c["archivo"]).is_file() for c in corrida.capturas))
+            # Cada captura queda anotada en disco al tomarla: si la corrida se corta, el PDF se arma igual.
+            en_disco = [json.loads(l) for l in (Path(tmp) / "capturas.jsonl").read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(en_disco, corrida.capturas)
 
     def test_sin_carpeta_no_captura(self):
         from demo import __main__ as runner

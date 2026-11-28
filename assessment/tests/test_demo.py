@@ -373,10 +373,11 @@ class PdfDelRecorrido(unittest.TestCase):
             carpeta = Path(tmp)
             for archivo in ("001.png", "002.png"):
                 (carpeta / archivo).write_bytes(png_liso())
-            ruta = runner.armar_pdf(carpeta, [
+            (carpeta / "capturas.jsonl").write_text("".join(json.dumps(c, ensure_ascii=False) + "\n" for c in [
                 {"archivo": "001.png", "donde": "portada · paso 1", "texto": "Hola <b>ustedes</b>", "error": False, "t": 1.0},
                 {"archivo": "002.png", "donde": "caso · paso 3", "texto": "no apareció «#x»", "error": True, "t": 42.5},
-            ])
+            ]), encoding="utf-8")
+            ruta = runner.armar_pdf(carpeta)
             pdf = ruta.read_bytes()
             self.assertTrue(pdf.startswith(b"%PDF"))
             self.assertEqual(len(re.findall(rb"/Type\s*/Page\b(?!s)", pdf)), 2)
@@ -407,6 +408,17 @@ class Grabacion(unittest.TestCase):
             runner.detener_grabacion(_Screencapture(["screencapture", "-v", "-V60", str(Path(tmp) / "demo.mov")]))
         aviso.assert_called_once()
         self.assertIn("grabación", aviso.call_args.args[0])
+
+    def test_la_restauracion_no_la_corta_otra_senal(self):
+        # Ya restaurando, un segundo Ctrl+C, un kill o cerrar la terminal no la dejan a medias (28 nov: un SIGTERM
+        # cortó la reposición de Power BI).
+        import signal
+        from demo.__main__ import atrapar_cortes, proteger_restauracion
+        previos = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+        self.addCleanup(lambda: [signal.signal(s, h) for s, h in previos.items()])
+        atrapar_cortes()
+        proteger_restauracion()
+        self.assertEqual({signal.getsignal(s) for s in previos}, {signal.SIG_IGN})
 
     def test_cerrar_la_terminal_corta_como_ctrl_c(self):
         import signal

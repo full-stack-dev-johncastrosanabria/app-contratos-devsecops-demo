@@ -224,7 +224,10 @@ Recorre todo a ×6 con el motor «solo evidencia» en una ventana de 1440×900 y
 ```bash
 assessment/.venv/bin/python -m demo --sin-voz --sin-grabar --ventana
 ```
-Con `--sin-voz`, la demo toma una captura a mitad de cada frase, con su subtítulo en pantalla, y otra por cada fallo. Al final arma `demo/.registro/<fecha>/recorrido.pdf`: una captura por página con su paso, el minuto y la frase, y los fallos en rojo. Sirve para encontrar errores y lo que podría verse mejor sin gastar clips de voz. Las capturas no alargan las frases.
+Con `--sin-voz`, la demo toma una captura a mitad de cada frase, con su subtítulo en pantalla, y otra por cada fallo. Al final arma `demo/.registro/<fecha>/recorrido.pdf`: una captura por página con su paso, el minuto y la frase, y los fallos en rojo. Sirve para encontrar errores y lo que podría verse mejor sin gastar clips de voz. Las capturas no alargan las frases. Si la corrida se corta antes de armarlo, cada captura ya quedó anotada en `capturas.jsonl` y el PDF se arma con:
+```bash
+assessment/.venv/bin/python -c "from pathlib import Path; from demo.__main__ import armar_pdf; print(armar_pdf(Path('demo/.registro/<fecha>')))"
+```
 
 ### En vivo
 ```bash
