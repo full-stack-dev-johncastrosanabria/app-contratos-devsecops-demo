@@ -97,6 +97,18 @@ class DirectorEnPagina(unittest.TestCase):
         ms = page.evaluate("async () => { const t = performance.now(); await __director.esperar(1000); return performance.now() - t; }")
         self.assertAlmostEqual(ms, 800, delta=150)
 
+    def test_respiro_en_segundos_reales_y_siguiente_lo_corta(self):
+        page = self.abrir(velocidad=1.25)
+        # A 1,25× el respiro tras la línea no se acelera: 2 s reales, no 1,6.
+        ms = page.evaluate("async () => { const t = performance.now(); await __director.decir('línea', null, 0, 2); return performance.now() - t; }")
+        self.assertAlmostEqual(ms, 2000, delta=150)
+        for duracion in (0, 5):  # «Siguiente» corta el respiro, y si corta la línea tampoco deja respiro
+            page.evaluate(f"() => {{ window.__t0 = performance.now(); window.__fin = null; __director.decir('línea', null, {duracion}, 5).then(() => {{ window.__fin = performance.now() - window.__t0; }}); }}")
+            page.wait_for_timeout(100)
+            page.keyboard.press("n")
+            page.wait_for_function("() => window.__fin !== null", timeout=3000)
+            self.assertLess(page.evaluate("() => window.__fin"), 500, duracion)
+
     def test_siguiente_corta(self):
         page = self.abrir()
         page.evaluate("() => { window.__t0 = performance.now(); window.__fin = null; __director.decir('línea', null, 5).then(() => { window.__fin = performance.now() - window.__t0; }); }")

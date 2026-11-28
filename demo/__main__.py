@@ -478,10 +478,11 @@ class Corrida:
         for texto in guion.lista(textos):
             clip = self.clips[texto]
             url = None if self.sin_voz or not clip["archivo"] else f"{CONSOLA}/__demo/voz/{clip['archivo'].name}"
+            # El respiro se elige en la página por la velocidad en curso, que el presentador puede cambiar.
             fila["narracion_s"] += self.js(
-                "async ([t, u, d]) => { const a = __director.estado().transcurrido_s;"
-                " await __director.decir(t, u, d); return __director.estado().transcurrido_s - a; }",
-                [texto, url, clip["duracion"]],
+                "async ([t, u, d, r]) => { const e = __director.estado(), a = e.transcurrido_s;"
+                " await __director.decir(t, u, d, r[String(e.velocidad)] || 0); return __director.estado().transcurrido_s - a; }",
+                [texto, url, clip["duracion"], {str(v): s for v, s in guion.RESPIRO_S.items()}],
             )
 
     def objetivo(self, selector: str):

@@ -17,7 +17,10 @@ DENTRO_DE_APP = ("clic", "narrar", "esperar")
 MOTORES = ("agente", "solo-evidencia")
 VENTANA_S = (480, 720)
 LIMITE_S = 690
-CARACTERES_POR_S = 17  # ritmo medido de Dalia a 1×
+CARACTERES_POR_S = 16  # ritmo medido de la voz de ElevenLabs a 1× (27 nov 2026)
+# Silencio real tras cada línea, sin escalar: a más velocidad la voz corre más y la sala necesita respirar.
+# Sostiene los 8 min a 1,25× aunque los agentes terminen antes; a 0,75× no hace falta. Fuera del menú (ensayo a 6×) no hay.
+RESPIRO_S = {0.75: 0.0, 1: 0.3, 1.25: 0.6}
 OVERHEAD = {"slide": 1.5, "narrar": 0.6, "clic": 1.2, "elegir": 1.0, "escribir": 0.0, "esperar": 0.0, "reporte": 1.0, "app": 1.5}
 TECLEO_S = 0.06
 ESPERAS = ("esperar", "reporte")  # pasos con una espera real que «voz_mientras» puede cubrir
@@ -107,6 +110,7 @@ def duracion_estimada(texto: str) -> float:
 def proyectar(pasos: list[dict], duraciones: dict[str, float], velocidad: float,
               esperas: str = "nominal", opcionales: bool = True) -> float:
     total = 0.0
+    respiro = RESPIRO_S.get(velocidad, 0.0)
     for paso in pasos:
         tipo = paso["tipo"]
         if paso.get("opcional") and not opcionales:
@@ -114,13 +118,13 @@ def proyectar(pasos: list[dict], duraciones: dict[str, float], velocidad: float,
         if tipo in ESPERAS:
             minimo, maximo = paso["espera_s"]
             espera = {"min": minimo, "max": maximo}.get(esperas, (minimo + maximo) / 2)
-            cubierta = sum(duraciones[t] for t in lista(paso.get("voz_mientras")))
-            total += max(espera, cubierta / velocidad)
+            mientras = lista(paso.get("voz_mientras"))
+            total += max(espera, sum(duraciones[t] for t in mientras) / velocidad + respiro * len(mientras))
             if tipo == "esperar":
                 continue
-        narracion = sum(duraciones[t] for t in lista(paso.get("voz")))
+        voz = lista(paso.get("voz"))
         accion = OVERHEAD[tipo] + (TECLEO_S * len(paso.get("texto", "")) if tipo == "escribir" else 0.0)
-        total += (narracion + accion) / velocidad
+        total += (sum(duraciones[t] for t in voz) + accion) / velocidad + respiro * len(voz)
     return total
 
 

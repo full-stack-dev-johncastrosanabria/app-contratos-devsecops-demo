@@ -204,7 +204,8 @@ escenas:
         foco: "#ledger"
         etiqueta: Matriz de evaluación
         voz: "Volvamos a la consola: la matriz se llena en vivo."
-      # espera_s es lo que queda de los 150–210 s de la corrida tras el grafo y Actions (54 s a 1,25×, 91 s a 0,75×).
+      # espera_s es lo que queda de una corrida de 110–210 s tras el grafo y Actions (69 s a 1,25×, 113 s a 0,75×).
+      # Medido el 27 nov 2026: la corrida tardó ~135 s y la narración tapó la espera.
       - tipo: esperar
         motor: agente
         condicion: &dictamenes >-
@@ -213,7 +214,7 @@ escenas:
             ['pass', 'fail', 'unknown'].includes(document.querySelector(`#ledger-head th.ledger-ver[data-ver="${v}"]`)?.dataset.verdict) &&
             document.querySelector(`#card-${v} .provenance-chip`)?.dataset.live === 'true')
         max_s: 420
-        espera_s: [96, 119]
+        espera_s: [41, 97]
         en_vivo: los agentes evalúan las tres entregas
         # La tarjeta con error solo se ve con su pestaña activa: primero la pestaña, luego «Reintentar vN con Solo evidencia».
         si_error: &reintento >-

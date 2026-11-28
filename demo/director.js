@@ -167,16 +167,22 @@
   let corte = null; // lo que «Siguiente» corta: la línea o el esperar en curso
   let liberarFrontera = null;
 
-  function decir(texto, url, duracion) {
+  // `respiro`: segundos reales de silencio tras la línea; no escalan con la velocidad y «Siguiente» los corta.
+  function decir(texto, url, duracion, respiro = 0) {
+    return sonar(texto, url, duracion).then((sola) => (sola && respiro > 0 ? esperar(respiro * 1000 * est.velocidad) : undefined));
+  }
+
+  // Resuelve true si la línea terminó sola; false si la cortaron («Siguiente», otra línea o el fin de la demo).
+  function sonar(texto, url, duracion) {
     montar();
-    if (est.terminado) return Promise.resolve();
+    if (est.terminado) return Promise.resolve(false);
     if (linea) linea.terminar();
     if (!url) mostrarSubtitulo(String(texto ?? "")); // con voz, solo la voz
     const dur = Math.max(0, Number(duracion) || 0);
     return new Promise((resolver) => {
       const actual = { clip: null, respaldo: temporizador(url ? dur + 2 : dur), degradar: () => {} };
       let hecho = false;
-      actual.terminar = () => {
+      const cerrar = (sola) => {
         if (hecho) return;
         hecho = true;
         actual.respaldo.cortar();
@@ -190,9 +196,10 @@
         if (linea === actual) linea = null;
         if (corte === actual) corte = null;
         retirarSubtitulo();
-        resolver();
+        resolver(sola);
       };
-      actual.respaldo.promesa.then(actual.terminar);
+      actual.terminar = () => cerrar(false);
+      actual.respaldo.promesa.then(() => cerrar(true));
       if (url) {
         const clip = new Audio(url);
         clip.preservesPitch = true;
@@ -204,7 +211,7 @@
           actual.respaldo.ajustar(-2);
           mostrarSubtitulo(String(texto ?? "")); // sin audio, que la línea no quede muda
         };
-        clip.addEventListener("ended", actual.terminar);
+        clip.addEventListener("ended", () => cerrar(true));
         clip.addEventListener("error", actual.degradar);
         actual.clip = clip;
         if (!est.pausado) clip.play().catch(actual.degradar);

@@ -30,26 +30,36 @@ class GuionModelo(unittest.TestCase):
 
     def test_proyectar_modelo(self):
         pasos = [
-            {"tipo": "narrar", "voz": "x" * 34},
-            {"tipo": "esperar", "condicion": "true", "max_s": 30, "espera_s": [10, 20], "voz_mientras": ["y" * 17]},
-            {"tipo": "narrar", "voz": "z" * 17, "opcional": True},
+            {"tipo": "narrar", "voz": "x" * 32},
+            {"tipo": "esperar", "condicion": "true", "max_s": 30, "espera_s": [10, 20], "voz_mientras": ["y" * 16]},
+            {"tipo": "narrar", "voz": "z" * 16, "opcional": True},
         ]
         d = {t: guion.duracion_estimada(t) for p in pasos for t in guion.voces(p)}
         o = guion.OVERHEAD["narrar"]
-        self.assertAlmostEqual(guion.proyectar(pasos, d, 1, "min", False), 2 + o + 10)
+        self.assertAlmostEqual(guion.proyectar(pasos, d, 1, "min", False), 2 + o + 0.3 + 10)
         self.assertAlmostEqual(
             guion.proyectar(pasos, d, 0.5, "max", True),
             (2 + o) / 0.5 + max(20, 1 / 0.5) + (1 + o) / 0.5,
         )
 
+    def test_proyectar_suma_el_respiro_segun_velocidad(self):
+        # El respiro tras cada línea es tiempo real: no se divide por la velocidad. A 0,75× y en el ensayo (6×) no hay.
+        pasos = [{"tipo": "narrar", "voz": ["x" * 16, "y" * 16]}]
+        d = {t: guion.duracion_estimada(t) for t in guion.voces(pasos[0])}
+        o = guion.OVERHEAD["narrar"]
+        self.assertAlmostEqual(guion.proyectar(pasos, d, 1.25), (2 + o) / 1.25 + 2 * 0.6)
+        self.assertAlmostEqual(guion.proyectar(pasos, d, 1), 2 + o + 2 * 0.3)
+        self.assertAlmostEqual(guion.proyectar(pasos, d, 0.75), (2 + o) / 0.75)
+        self.assertAlmostEqual(guion.proyectar(pasos, d, 6), (2 + o) / 6)
+
     def test_reporte_espera_que_se_dibuje_y_luego_narra(self):
-        reporte = {"tipo": "reporte", "voz": "x" * 17, "voz_mientras": ["y" * 34], "max_s": 60, "espera_s": [10, 20]}
+        reporte = {"tipo": "reporte", "voz": "x" * 16, "voz_mientras": ["y" * 32], "max_s": 60, "espera_s": [10, 20]}
         g = deepcopy(MINIMO)
         g["escenas"][0]["pasos"] = [reporte, {"tipo": "reporte", "voz": "z", "espera_s": [9, 3]}]
         self.assertEqual(guion.validar(g), ["a · paso 2: «reporte» necesita «max_s».", "a · paso 2: «espera_s» debe ser [min, max]."])
         d = {t: guion.duracion_estimada(t) for t in guion.voces(reporte)}
         o = guion.OVERHEAD["reporte"]
-        self.assertAlmostEqual(guion.proyectar([reporte], d, 1, "min"), 10 + 1 + o)
+        self.assertAlmostEqual(guion.proyectar([reporte], d, 1, "min"), 10 + 1 + o + 0.3)
         self.assertAlmostEqual(guion.proyectar([reporte], d, 0.05, "max"), 2 / 0.05 + (1 + o) / 0.05)
 
     def test_filtrar_motor(self):
@@ -310,6 +320,18 @@ class _Screencapture:
 
     def kill(self):
         self.returncode = -9
+
+
+class Respiro(unittest.TestCase):
+    def test_cada_linea_pide_el_respiro_que_proyecta_el_guion(self):
+        # La página elige el respiro por la velocidad en curso: el mismo que suma proyectar().
+        from demo import __main__ as runner
+        corrida = runner.Corrida({"escenas": []}, {"hola": {"archivo": None, "duracion": 1.0}}, sin_voz=True, ensayo=False)
+        llamadas = []
+        corrida.js = lambda codigo, arg=None, en=None: llamadas.append(arg) or 0.0
+        corrida.decir("hola", {"narracion_s": 0.0})
+        self.assertEqual(llamadas[0][3], {str(v): s for v, s in guion.RESPIRO_S.items()})
+        self.assertEqual(llamadas[0][3], {"0.75": 0.0, "1": 0.3, "1.25": 0.6})
 
 
 class Grabacion(unittest.TestCase):
