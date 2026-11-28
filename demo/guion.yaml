@@ -127,6 +127,7 @@ escenas:
         cerrar: true
       - tipo: clic
         selector: "#stop-sandbox"
+        confirmar: true
         voz: La pregunta es si la evidencia de cada entrega lo detecta, sin que nadie tenga que probarlo a mano.
       - tipo: esperar
         condicion: document.querySelector('#sandbox-pill').dataset.active === 'false'

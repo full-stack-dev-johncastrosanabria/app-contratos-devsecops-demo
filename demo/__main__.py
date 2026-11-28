@@ -250,7 +250,8 @@ def revision_previa(motor: str) -> None:
         url = (fetch_azure_runtime(cfg).get("despliegue") or {}).get("url")
     except Exception:  # solo informa: la demo puede seguir
         url = None
-    if url and _responde(url + "/api/salud", timeout=8):
+    # Con minReplicas 0, el primer pedido despierta la réplica: medido, 29 s en frío y 0,4 s ya despierta.
+    if url and _responde(url + "/api/salud", timeout=45):
         _ok("Ingreso de ACA encendido")
     else:
         _aviso("Ingreso de ACA apagado o sin respuesta: las etapas 5–7 saldrán con evidencia degradada. Para encenderlo:\n"

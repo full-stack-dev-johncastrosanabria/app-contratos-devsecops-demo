@@ -241,6 +241,12 @@ class GuionReal(unittest.TestCase):
         self.assertEqual(guion.validar(self.g), [])
         self.assertEqual([e["id"] for e in self.g["escenas"]], IDS_ESCENAS)
 
+    def test_detener_el_sandbox_confirma(self):
+        # «Detener :5080» se arma en la primera pulsación: sin confirmar, v2 seguía activa y Remediación no podía relanzarla.
+        clics = [p for e in self.g["escenas"] for p in e["pasos"] if p["tipo"] == "clic" and p["selector"] == "#stop-sandbox"]
+        self.assertTrue(clics)
+        self.assertTrue(all(p.get("confirmar") for p in clics), clics)
+
     def test_guion_real_ventana(self):
         g = guion.filtrar(self.g, "agente")
         pasos = [p for e in g["escenas"] for p in e["pasos"]]
