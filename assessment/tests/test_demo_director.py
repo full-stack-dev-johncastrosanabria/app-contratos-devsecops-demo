@@ -73,10 +73,13 @@ class DirectorEnPagina(unittest.TestCase):
         cls.browser.close()
         cls.pw.stop()
 
-    def abrir(self, ancho=1440, alto=900, velocidad=1):
-        page = self.browser.new_page(viewport={"width": ancho, "height": alto})
+    def abrir(self, ancho=1440, alto=900, velocidad=1, gsap=False, movimiento=None):
+        page = self.browser.new_page(viewport={"width": ancho, "height": alto}, reduced_motion=movimiento)
         self.addCleanup(page.close)
         page.set_content(PAGINA)
+        if gsap:  # el mismo GSAP que inyecta el runner; sin él, el director no anima y nada más cambia
+            from demo.__main__ import GSAP
+            page.add_script_tag(content=GSAP)
         page.add_script_tag(content=script_director())
         page.evaluate(f"() => __director.iniciar({{escenas: {ESCENAS}, velocidad: {velocidad}, pasoAPaso: false, total_s: 60}})")
         return page
@@ -459,6 +462,103 @@ class DirectorEnPagina(unittest.TestCase):
         page.add_script_tag(content=SIN_VENTANAS)
         self.assertEqual(page.evaluate("() => ['nextgen_powerbi_web', 'nextgen_sandbox_5080'].map((n) => window.open('about:blank', n))"),
                          [None, None])
+
+    # ---------- Animaciones (GSAP) ----------
+
+    def test_gsap_sigue_la_velocidad_y_la_pausa(self):
+        page = self.abrir(velocidad=0.75, gsap=True)
+        reloj = "() => [gsap.globalTimeline.timeScale(), gsap.globalTimeline.paused()]"
+        self.assertEqual(page.evaluate(reloj), [0.75, False])
+        page.keyboard.press(">")
+        page.evaluate("() => __director.pausar()")
+        self.assertEqual(page.evaluate(reloj), [1, True])
+        page.keyboard.press("Space")
+        self.assertEqual(page.evaluate(reloj), [1, False])
+        # Otra corrida en la misma página parte sin pausa y a su propia velocidad.
+        page.evaluate("() => __director.pausar()")
+        page.evaluate(f"() => __director.iniciar({{escenas: {ESCENAS}, velocidad: 1.25, pasoAPaso: false, total_s: 60}})")
+        self.assertEqual(page.evaluate(reloj), [1.25, False])
+
+    def test_maf_los_tres_agentes_trabajan_a_la_vez_y_la_pausa_los_congela(self):
+        page = self.abrir(gsap=True)
+        page.evaluate("() => __director.slide('maf', {})")
+        raiz = "document.querySelector('#demo-director').shadowRoot"
+        paquetes = f"() => [...{raiz}.querySelectorAll('.grafo .paquete')].map((p) => getComputedStyle(p).transform + ' ' + getComputedStyle(p).opacity)"
+        self.assertEqual(len(page.evaluate(paquetes)), 4)  # uno por rama y uno hacia la aprobación humana
+        # Las tres ramas corren en paralelo: hay un momento en que los tres agentes trabajan juntos.
+        page.wait_for_function(f"() => [...{raiz}.querySelectorAll('.agentes .trabajo')].filter((t) => +getComputedStyle(t).opacity > 0.5).length === 3",
+                               timeout=8000)
+        page.wait_for_function(f"() => [...{raiz}.querySelectorAll('.grafo .paquete')].some((p) => +getComputedStyle(p).opacity > 0.5)",
+                               timeout=8000)
+        antes = page.evaluate(paquetes)
+        page.wait_for_timeout(150)
+        self.assertNotEqual(page.evaluate(paquetes), antes)
+        page.evaluate("() => __director.pausar()")
+        congelado = page.evaluate(paquetes)
+        page.wait_for_timeout(400)
+        self.assertEqual(page.evaluate(paquetes), congelado)
+
+    def test_slide_animada_no_retrasa_el_guion(self):
+        # Las animaciones son decorativas: slide() resuelve a los 0,6 s de contenido, como sin GSAP.
+        page = self.abrir(velocidad=1.25, gsap=True)
+        ms = page.evaluate("async () => { const t = performance.now(); await __director.slide('maf', {}); return performance.now() - t; }")
+        self.assertAlmostEqual(ms, 600 / 1.25, delta=150)
+
+    def test_cambiar_o_retirar_la_slide_detiene_sus_animaciones(self):
+        page = self.abrir(gsap=True)
+        vivas = "() => gsap.globalTimeline.getChildren(true, true, true).length"
+        page.evaluate("() => __director.slide('maf', {})")
+        self.assertGreater(page.evaluate(vivas), 0)
+        page.evaluate("() => __director.slide('portada', {titulo: 'T', subtitulo: 'S'})")
+        self.assertEqual(page.evaluate(vivas), 0)
+        page.evaluate("() => __director.slide('gobernanza', {pasos: ['a', {texto: 'b', destacar: true}, 'c']})")
+        self.assertGreater(page.evaluate(vivas), 0)
+        page.evaluate("() => __director.ocultarSlide()")
+        self.assertEqual(page.evaluate(vivas), 0)
+
+    def test_movimiento_reducido_no_anima_las_slides(self):
+        page = self.abrir(gsap=True, movimiento="reduce")
+        for plantilla, datos in (("maf", {}), ("gobernanza", {"pasos": ["a", {"texto": "b", "destacar": True}]}),
+                                 ("pregunta", {"pregunta": "¿?", "fuentes": ["A", "B"], "remate": "r"}),
+                                 ("cierre", {"tesis": [{"texto": "t", "icono": "humano"}]})):
+            page.evaluate("([p, d]) => __director.slide(p, d)", [plantilla, datos])
+            self.assertEqual(page.evaluate("() => gsap.globalTimeline.getChildren(true, true, true).length"), 0, plantilla)
+
+    def test_pregunta_y_cierre_terminan_de_dibujarse(self):
+        page = self.abrir(velocidad=1.25, gsap=True)
+        raiz = "document.querySelector('#demo-director').shadowRoot"
+        page.evaluate("() => __director.slide('pregunta', {pregunta: '¿?', fuentes: ['A', 'B', 'C'], remate: 'r'})")
+        islas = f"[...{raiz}.querySelectorAll('.islas li')]"
+        self.assertGreater(page.evaluate(f"() => gsap.getTweensOf({islas}).length"), 0)
+        page.wait_for_function(f"() => gsap.getTweensOf({islas}).length === 0", timeout=5000)
+        self.assertEqual(page.evaluate(f"() => {islas}.map((li) => getComputedStyle(li).getPropertyValue('--trazo').trim())"), ["1", "1", "1"])
+        page.evaluate("() => __director.slide('cierre', {tesis: [{texto: 'a', icono: 'investigar'}, {texto: 'b', icono: 'humano'}]})")
+        trazos = f"[...{raiz}.querySelectorAll('.tesis .insignia .ico > *')]"
+        self.assertGreater(page.evaluate(f"() => gsap.getTweensOf({trazos}).length"), 0)
+        page.wait_for_function(f"() => gsap.getTweensOf({trazos}).length === 0", timeout=5000)
+        self.assertTrue(page.evaluate(f"() => {trazos}.every((t) => parseFloat(getComputedStyle(t).strokeDashoffset) === 0)"))
+
+    def test_en_vivo_de_los_agentes_muestra_tres_trabajando(self):
+        page = self.abrir()
+        ver = ("() => { const e = document.querySelector('#demo-director').shadowRoot.querySelector('.envivo');"
+               " return {agentes: [...e.querySelectorAll('.agente')].filter((a) => a.checkVisibility()).length,"
+               " punto: e.querySelector('.punto').checkVisibility()}; }")
+        page.evaluate("() => __director.enVivo('los agentes evalúan las tres entregas', {agentes: true})")
+        self.assertEqual(page.evaluate(ver), {"agentes": 3, "punto": False})
+        page.evaluate("() => __director.enVivo('la consola trabaja')")
+        self.assertEqual(page.evaluate(ver), {"agentes": 0, "punto": True})
+
+    def test_gsap_solo_en_el_marco_principal(self):
+        # add_init_script corre en cada marco: el reporte de Power BI y el portal no necesitan GSAP.
+        from demo.__main__ import GSAP
+        page = self.browser.new_page()
+        self.addCleanup(page.close)
+        page.set_content("<iframe srcdoc='<p>marco</p>'></iframe>")
+        page.add_script_tag(content=GSAP)
+        marco = page.frames[1]
+        marco.add_script_tag(content=GSAP)
+        self.assertEqual([page.evaluate("() => typeof window.gsap"), marco.evaluate("() => typeof window.gsap")],
+                         ["object", "undefined"])
 
 
 if __name__ == "__main__":

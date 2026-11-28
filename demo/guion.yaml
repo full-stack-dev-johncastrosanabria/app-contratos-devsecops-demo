@@ -220,6 +220,7 @@ escenas:
         max_s: 420
         espera_s: [41, 97]
         en_vivo: los agentes evalúan las tres entregas
+        agentes: true  # el chip «En vivo» muestra a los tres agentes trabajando
         # La tarjeta con error solo se ve con su pestaña activa: primero la pestaña, luego «Reintentar vN con Solo evidencia».
         si_error: &reintento >-
           #results .card-alert:not([hidden]) .btn-inline-action[data-eval]:not([disabled]),

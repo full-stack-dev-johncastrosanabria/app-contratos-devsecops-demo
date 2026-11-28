@@ -343,6 +343,22 @@ class Respiro(unittest.TestCase):
         self.assertEqual(llamadas[0][3], {str(v): s for v, s in guion.RESPIRO_S.items()})
         self.assertEqual(llamadas[0][3], {"0.75": 0.0, "1": 0.3, "1.25": 0.6})
 
+    def test_la_espera_de_los_agentes_los_muestra_en_vivo(self):
+        from demo import __main__ as runner
+        corrida = runner.Corrida({"escenas": []}, {}, sin_voz=True, ensayo=False)
+        llamadas = []
+        corrida.js = lambda codigo, arg=None, en=None: llamadas.append((codigo, arg)) or {"transcurrido_s": 0.0}
+        for agentes in (True, False):
+            llamadas.clear()
+            corrida._esperar({"en_vivo": "x", "agentes": agentes, "max_s": 5}, {"espera_s": 0.0}, listo=lambda: True)
+            en_vivo = [arg for codigo, arg in llamadas if "enVivo(t, o)" in codigo]
+            self.assertEqual(en_vivo, [["x", {"agentes": agentes}]])
+
+    def test_guion_real_solo_la_espera_con_agentes_los_muestra(self):
+        g = guion.cargar(Path(__file__).resolve().parents[2] / "demo" / "guion.yaml")
+        esperas = [p for e in g["escenas"] for p in e["pasos"] if p["tipo"] == "esperar" and p.get("agentes")]
+        self.assertEqual([p.get("motor") for p in esperas], ["agente"])
+
 
 class Grabacion(unittest.TestCase):
     def test_detener_la_grabacion_guarda_el_mov(self):

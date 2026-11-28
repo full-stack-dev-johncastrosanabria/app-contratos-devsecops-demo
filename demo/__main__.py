@@ -39,6 +39,10 @@ CACHE_VOZ = DEMO / ".voz"
 REGISTROS = DEMO / ".registro"
 GRABACIONES = Path.home() / "Movies"
 ATAJOS_APAGADOS = 'try { localStorage.setItem("nextgen.atajos", "off"); } catch (e) {}'
+# GSAP 3.15.1 para las animaciones del director (licencia en demo/vendor/LICENCIA.md). add_init_script corre en
+# cada marco; el reporte de Power BI y el portal no lo necesitan, así que solo se define en el principal.
+GSAP = "if (window.top === window) {\n" + (DEMO / "vendor" / "gsap.min.js").read_text(encoding="utf-8") + "\n}"
+
 # La demo enseña el reporte y el portal en sus propias slides: las pestañas que abre la consola le quitarían la pantalla.
 SIN_VENTANAS = ('(() => { const abrir = window.open, propias = ["nextgen_powerbi_web", "nextgen_sandbox_5080"];'
                 ' window.open = function (url, nombre, ...resto) {'
@@ -637,7 +641,8 @@ class Corrida:
                 self.js("() => __director.aviso('Una entrega respondió con error: se reintenta con Solo evidencia')")
                 self.pulsar(selector)
 
-        self.js("(t) => __director.enVivo(t)", paso.get("en_vivo") or "la consola está trabajando")
+        self.js("([t, o]) => __director.enVivo(t, o)",
+                [paso.get("en_vivo") or "la consola está trabajando", {"agentes": bool(paso.get("agentes"))}])
         for texto in guion.lista(paso.get("voz_mientras")):
             reintentar()
             self.decir(texto, fila)
@@ -710,6 +715,7 @@ def presentar(corrida: Corrida, velocidad: float, paso_a_paso: bool, ventana: bo
             contexto.route("**/__demo/captura/*", servir_captura)
             contexto.add_init_script(ATAJOS_APAGADOS)
             contexto.add_init_script(SIN_VENTANAS)
+            contexto.add_init_script(GSAP)
             contexto.add_init_script(f"window.__DIRECTOR_CSS = {json.dumps(css)};")
             contexto.add_init_script(director)
             contexto.expose_binding("__demoEvento", corrida.al_evento)

@@ -104,6 +104,7 @@
     }
     programar();
     if (!valor) esperasDePausa.splice(0).forEach((r) => r());
+    window.gsap?.globalTimeline[valor ? "pause" : "resume"]();
     ui.host?.toggleAttribute("data-pausado", valor);
     pintarBarra();
     emitir("estado");
@@ -115,6 +116,7 @@
     est.velocidad = v;
     reloj.ultimo = performance.now();
     if (linea && linea.clip) linea.clip.playbackRate = v;
+    window.gsap?.globalTimeline.timeScale(v);
     ui.host?.style.setProperty("--v", String(v));
     programar();
     pintarBarra();
@@ -284,6 +286,7 @@
     est.activo = true;
     ui.host.style.setProperty("--v", String(est.velocidad));
     ui.host.removeAttribute("data-pausado");
+    window.gsap?.globalTimeline.timeScale(est.velocidad).resume();
     construirMarcas();
     mostrarBarra();
     clearInterval(reloj.tic);
@@ -365,7 +368,7 @@
     <section class="slide" hidden></section>
     <p class="subtitulos" aria-live="polite"><span class="linea"></span></p>
     <div class="cursor" hidden>${CURSOR}</div>
-    <p class="envivo" hidden><span class="punto"></span><span><b>En vivo:</b> <span class="envivo-texto"></span></span></p>
+    <p class="envivo" hidden><span class="punto"></span><span class="agentes-envivo" aria-hidden="true"><span class="agente"></span><span class="agente"></span><span class="agente"></span></span><span><b>En vivo:</b> <span class="envivo-texto"></span></span></p>
     <p class="aviso" role="status" hidden></p>
     <div class="barra" role="toolbar" aria-label="Control de la demo">
       <span class="estado-chip" hidden></span>
@@ -544,9 +547,10 @@
     if (texto) retiroAviso = setTimeout(() => { ui.aviso.hidden = true; }, 3600);
   }
 
-  function enVivo(texto) {
+  function enVivo(texto, { agentes = false } = {}) {
     montar();
     ui.envivoTexto.textContent = texto ? String(texto) : "";
+    ui.envivo.toggleAttribute("data-agentes", Boolean(texto && agentes));
     ui.envivo.hidden = !texto;
   }
 
@@ -918,12 +922,129 @@
       cta && h("p", { class: "cta entra" }, icono("flecha"), h("span", {}, cta))),
   };
 
+  /* ---------- Animaciones (GSAP, si el runner lo inyectó) ----------
+     Decorativas: nunca bloquean el guion. El reloj global de GSAP sigue la velocidad y la pausa de la demo.
+     Dentro del shadow root se anima por referencia: un selector de texto buscaría en document. */
+  let animacion = null;
+
+  function detenerAnimacion() {
+    animacion?.revert();
+    animacion = null;
+  }
+
+  function animar(plantilla) {
+    const g = window.gsap;
+    const fn = ANIMACIONES[plantilla];
+    if (!g || !fn || reducido()) return;
+    animacion = g.context(() => fn(g, ui.slide));
+  }
+
+  // Un paquete recorre un trazo del conector. El svg se estira (preserveAspectRatio="none"), así que el punto
+  // se lleva a mano de la caja 100×100 a la caja dibujada, en coordenadas del grafo sin escalar.
+  function recorrer(g, grafo, paquete, svg, trazo, duracion) {
+    const largo = trazo.getTotalLength();
+    const avance = { t: 0 };
+    return g.to(avance, {
+      t: 1,
+      duration: duracion,
+      ease: "power1.inOut",
+      onUpdate: () => {
+        const p = trazo.getPointAtLength(avance.t * largo);
+        const base = grafo.getBoundingClientRect();
+        const caja = svg.getBoundingClientRect();
+        const k = base.width / grafo.offsetWidth || 1;
+        g.set(paquete, {
+          x: (caja.left - base.left + (p.x / 100) * caja.width) / k,
+          y: (caja.top - base.top + (p.y / 100) * caja.height) / k,
+        });
+      },
+    });
+  }
+
+  const ANILLO = (rgb, abierto) => `0 0 0 ${abierto ? 14 : 0}px rgba(${rgb}, ${abierto ? 0 : 0.6})`;
+
+  const ANIMACIONES = {
+    // Tres ramas en paralelo que se reúnen antes del dictamen y un punto de control humano. Cada agente tarda
+    // distinto; la política espera al último. El sello es neutro: el dictamen cambia según la entrega.
+    maf: (g, raiz) => {
+      const grafo = raiz.querySelector(".grafo");
+      const [abre, cierra, recto] = grafo ? grafo.querySelectorAll(".conector") : [];
+      if (!recto) return;
+      const [recolector, politica, humano] = grafo.querySelectorAll(":scope > .caja");
+      const agentes = [...grafo.querySelectorAll(".agentes .caja")];
+      const trabajos = agentes.map((caja) => caja.appendChild(h("span", { class: "trabajo", "aria-hidden": "true" })));
+      const paquetes = Array.from({ length: 4 }, () => grafo.appendChild(h("span", { class: "paquete", "aria-hidden": "true" })));
+      const ramasAbre = abre.querySelectorAll("path");
+      const ramasCierra = cierra.querySelectorAll("path");
+      const TRABAJO_S = [1.3, 1.9, 1.6];
+      const llega = 1.2;
+      const union = llega + Math.max(...TRABAJO_S) + 0.8;
+      const tl = g.timeline({ repeat: -1, repeatDelay: 0.8, delay: 0.7 });
+      tl.fromTo(recolector, { boxShadow: ANILLO("41, 197, 246", false) }, { boxShadow: ANILLO("41, 197, 246", true), duration: 0.7, ease: "power2.out" }, 0);
+      agentes.forEach((caja, i) => {
+        const sale = llega + TRABAJO_S[i];
+        tl.set(paquetes[i], { opacity: 1 }, 0.3)
+          .add(recorrer(g, grafo, paquetes[i], abre, ramasAbre[i], 0.9), 0.3)
+          .set(paquetes[i], { opacity: 0 }, llega)
+          .to(trabajos[i], { opacity: 1, duration: 0.2 }, llega)
+          .to(caja, { borderColor: "#29c5f6", duration: 0.2 }, llega)
+          .to(trabajos[i], { opacity: 0, duration: 0.2 }, sale)
+          .to(caja, { borderColor: "#355d96", duration: 0.3 }, sale)
+          .set(paquetes[i], { opacity: 1 }, sale)
+          .add(recorrer(g, grafo, paquetes[i], cierra, ramasCierra[i], 0.8), sale)
+          .set(paquetes[i], { opacity: 0 }, sale + 0.8);
+      });
+      tl.fromTo(politica, { boxShadow: ANILLO("41, 197, 246", false) }, { boxShadow: ANILLO("41, 197, 246", true), duration: 0.8, ease: "power2.out" }, union)
+        .set(paquetes[3], { opacity: 1 }, union + 0.3)
+        .add(recorrer(g, grafo, paquetes[3], recto, recto.querySelector("path"), 0.6), union + 0.3)
+        .set(paquetes[3], { opacity: 0 }, union + 0.9)
+        .fromTo(humano, { boxShadow: ANILLO("125, 211, 252", false) }, { boxShadow: ANILLO("125, 211, 252", true), duration: 0.9, repeat: 1, ease: "power1.out" }, union + 0.9);
+    },
+
+    // Las islas se conectan una tras otra (el conector es un ::after: se anima su escala por variable).
+    pregunta: (g, raiz) => {
+      const islas = [...raiz.querySelectorAll(".islas li:not(:last-child)")];
+      if (islas.length) g.fromTo(islas, { "--trazo": 0 }, { "--trazo": 1, duration: 0.7, ease: "power2.inOut", stagger: 0.3, delay: 0.55 });
+    },
+
+    // Una ficha baja por el flujo y se detiene en la decisión humana hasta que «una persona aprueba».
+    gobernanza: (g, raiz) => {
+      const flujo = raiz.querySelector(".flujo");
+      const nodos = flujo ? [...flujo.querySelectorAll(":scope > li > .nodo")] : [];
+      if (nodos.length < 2) return;
+      const parada = nodos.findIndex((n) => n.parentElement.hasAttribute("data-destacar"));
+      const ficha = flujo.appendChild(h("span", { class: "ficha", "aria-hidden": "true" }));
+      const y = (n) => n.parentElement.offsetTop + n.offsetTop + n.offsetHeight / 2;
+      const tl = g.timeline({ repeat: -1, repeatDelay: 0.8, delay: 0.9 });
+      tl.set(ficha, { y: y(nodos[0]), opacity: 0 }).to(ficha, { opacity: 1, duration: 0.25 });
+      nodos.slice(1).forEach((nodo, i) => {
+        tl.to(ficha, { y: y(nodo), duration: 0.7, ease: "power1.inOut" });
+        if (i + 1 === parada) {
+          tl.fromTo(nodo, { boxShadow: ANILLO("41, 197, 246", false) }, { boxShadow: ANILLO("41, 197, 246", true), duration: 0.8, repeat: 1, ease: "power1.out" });
+        }
+      });
+      tl.to(ficha, { opacity: 0, duration: 0.3 });
+    },
+
+    // Cada ícono de las tesis se dibuja trazo a trazo cuando entra su columna.
+    cierre: (g, raiz) => {
+      raiz.querySelectorAll(".tesis .insignia .ico").forEach((svg, i) => {
+        const trazos = [...svg.children];
+        trazos.forEach((t) => t.setAttribute("pathLength", "1"));
+        // Arranca con el guion bien fuera del trazo: con extremos redondeados un desfase de 1 aún deja un punto.
+        g.fromTo(trazos, { strokeDasharray: "1 2", strokeDashoffset: 1.5 },
+          { strokeDashoffset: 0, duration: 1.1, ease: "power2.out", stagger: 0.12, delay: 0.5 + i * 0.22 });
+      });
+    },
+  };
+
   async function slide(plantilla, datos) {
     montar();
     const fabrica = PLANTILLAS[plantilla];
     if (!fabrica) throw new Error(`Plantilla de slide desconocida: ${plantilla}`);
     const contenido = fabrica(datos || {});
     const piezas = plantilla === "portada" ? [contenido] : [h("div", { class: "membrete", "aria-hidden": "true" }, monograma(), "NextGen DevSecOps Assessment"), contenido];
+    detenerAnimacion();
     ui.slide.replaceChildren(...piezas);
     ui.slide.dataset.plantilla = plantilla;
     ui.slide.querySelectorAll(".entra").forEach((el, i) => {
@@ -934,6 +1055,7 @@
     ui.slide.hidden = false;
     await new Promise((r) => requestAnimationFrame(r));
     ui.slide.setAttribute("data-visible", "");
+    animar(plantilla); // decorativo: slide() resuelve a los mismos 0,6 s
     await pausa(0.6);
     return true;
   }
@@ -946,6 +1068,7 @@
     await pausa(0.4);
     ui.slide.hidden = true;
     ui.slide.removeAttribute("data-sale");
+    detenerAnimacion(); // tras el fundido: revertir antes haría saltar paquetes e íconos mientras se va
     ui.slide.replaceChildren();
     return true;
   }
