@@ -86,6 +86,15 @@ def rutas_sucias(repo: Path) -> list[str]:
     return [linea for linea in salida.splitlines() if linea.strip()]
 
 
+def cambios_ajenos(repo: Path, runs: Path) -> list[str]:
+    """Cambios sin commit en las rutas de la demo que no son parches suyos: el reinicio previo los revertiría con git."""
+    from assessment.remediation import get_remediation_state
+    from assessment.vulnerabilities import get_vuln_state
+    parches = [*get_remediation_state(runs)["parches_locales"].values(), *get_vuln_state(runs)["parches_aplicados"].values()]
+    propios = {p.get("archivo") for p in parches if isinstance(p, dict) and "contenido_original" in p}
+    return [linea for linea in rutas_sucias(repo) if linea[3:] not in propios]
+
+
 def trivy_vigente(metadata: Path, ahora: datetime) -> bool:
     try:
         return datetime.fromisoformat(json.loads(metadata.read_text(encoding="utf-8"))["NextUpdate"]) > ahora
@@ -143,12 +152,18 @@ def asegurar_consola() -> subprocess.Popen | None:
         return None
     REGISTROS.mkdir(exist_ok=True)
     with (REGISTROS / "consola.log").open("ab") as log:
-        proceso = subprocess.Popen([sys.executable, "-m", "assessment.ui"], cwd=REPO, stdout=log, stderr=subprocess.STDOUT)
+        # Fuera del grupo de la terminal: al cerrarla, su SIGHUP la mataba sin su finally y dejaba dotnet en :5080.
+        proceso = subprocess.Popen([sys.executable, "-m", "assessment.ui"], cwd=REPO, stdout=log, stderr=subprocess.STDOUT,
+                                   start_new_session=True)
     limite = time.monotonic() + 30
-    while time.monotonic() < limite and proceso.poll() is None:
-        if _responde(CONSOLA + "/"):
-            return proceso
-        time.sleep(0.3)
+    try:
+        while time.monotonic() < limite and proceso.poll() is None:
+            if _responde(CONSOLA + "/"):
+                return proceso
+            time.sleep(0.3)
+    except KeyboardInterrupt:  # el Ctrl+C de la terminal ya no le llega: si corta la espera, se la detiene aquí
+        detener_consola(proceso)
+        raise
     detener_consola(proceso)
     raise Abortar(f"la consola no arrancó; revisa {REGISTROS / 'consola.log'}.")
 
@@ -804,8 +819,13 @@ def limpiar(consola: subprocess.Popen | None, tocado: bool) -> None:
         return
     try:
         resumen = reiniciar_en_proceso() if consola is not None else reiniciar_por_http()
-        _ok("Reinicio · " + resumen_reinicio(resumen))
-        reiniciado = True
+        # Sin token de az, Boards responde «no disponible» sin fallar: la tarea de la demo sigue abierta.
+        reiniciado = (resumen.get("boards") or {}).get("disponible") is not False
+        if reiniciado:
+            _ok("Reinicio · " + resumen_reinicio(resumen))
+        else:
+            _aviso("Reinicio · " + resumen_reinicio(resumen) + ". La tarea de la demo sigue en Boards: "
+                   "la retira el reinicio previo de la próxima corrida.")
     except Exception as exc:  # se informa y se sigue: la próxima corrida empieza reiniciando
         _aviso(f"El reinicio falló ({exc}). Vuelve a lanzar la demo: su reinicio previo lo completa.")
         reiniciado = False
@@ -914,16 +934,31 @@ def _como_ctrl_c(_signum, _frame):
     raise KeyboardInterrupt
 
 
+def _sin_terminal(_signum=None, _frame=None) -> None:
+    """La terminal se cerró: cada escritura en ella da EIO y cortaría la restauración. Lo que falta va a salida.log."""
+    REGISTROS.mkdir(exist_ok=True)
+    registro = os.open(REGISTROS / "salida.log", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    for fd in (1, 2):  # también git y az, que heredan la terminal
+        os.dup2(registro, fd)
+    os.close(registro)
+
+
+def _terminal_cerrada(_signum, _frame):
+    _sin_terminal()
+    raise KeyboardInterrupt
+
+
 def proteger_restauracion() -> None:
-    """Ya restaurando, ni un segundo Ctrl+C, ni un kill, ni cerrar la terminal la dejan a medias."""
-    for corte in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    """Ya restaurando, ni un segundo Ctrl+C ni un kill la dejan a medias; cerrar la terminal solo le cambia la salida."""
+    for corte in (signal.SIGINT, signal.SIGTERM):
         signal.signal(corte, signal.SIG_IGN)
+    signal.signal(signal.SIGHUP, _sin_terminal)
 
 
 def atrapar_cortes() -> None:
     """kill (SIGTERM) y cerrar la terminal (SIGHUP) cortan como Ctrl+C: el finally detiene la grabación antes que nada."""
-    for corte in (signal.SIGTERM, signal.SIGHUP):
-        signal.signal(corte, _como_ctrl_c)
+    signal.signal(signal.SIGTERM, _como_ctrl_c)
+    signal.signal(signal.SIGHUP, _terminal_cerrada)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -951,6 +986,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         consola = asegurar_consola()
         _ok("Consola lanzada por la demo en :8050" if consola else "Consola ya en marcha en :8050")
+        ajenos = cambios_ajenos(REPO, RUNS)
+        if ajenos:  # antes del reinicio previo, que los revertiría con git sin preguntar
+            raise Abortar("hay cambios sin commit en las rutas de la demo que no dejó una corrida anterior:\n"
+                          + "\n".join(f"      {linea}" for linea in ajenos)
+                          + "\n  Haz commit o stash antes de presentar; si sobraron de una demo, descártalos con git checkout.")
         tocado = True
         _ok("Reinicio previo · " + resumen_reinicio(reiniciar_por_http()))
         revision_previa(args.motor)

@@ -298,6 +298,37 @@ class RunnerPrevio(unittest.TestCase):
             (repo / "README.md").write_text("cambio fuera de las rutas de la demo\n")
             self.assertEqual(rutas_sucias(repo), [" M Dockerfile"])
 
+    def test_cambios_ajenos_deja_fuera_los_parches_que_la_demo_registro(self):
+        # El reinicio previo revierte con git: un cambio del usuario se perdería; uno de la demo tiene su original guardado.
+        from demo.__main__ import cambios_ajenos
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, runs = Path(tmp) / "repo", Path(tmp) / "runs"
+            (repo / "v2").mkdir(parents=True)
+            runs.mkdir()
+            git = lambda *a: subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True)
+            git("init", "-q")
+            (repo / "Dockerfile").write_text("FROM x\n")
+            (repo / "v2" / "Renovaciones.cs").write_text("original\n")
+            git("add", ".")
+            git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base")
+            (repo / "Dockerfile").write_text("FROM y\n")  # el usuario lo editaba y aún no hizo commit
+            (repo / "v2" / "Renovaciones.cs").write_text("parche de la demo\n")
+            (runs / "_estado_remediacion.json").write_text(json.dumps({"parches_locales": {
+                "v2": {"archivo": "v2/Renovaciones.cs", "contenido_original": "original\n"}}}))
+            self.assertEqual(cambios_ajenos(repo, runs), [" M Dockerfile"])
+
+    def test_con_cambios_ajenos_la_demo_se_detiene_antes_del_reinicio(self):
+        from demo import __main__ as runner
+        with mock.patch.object(runner, "atrapar_cortes"), mock.patch.object(runner, "proteger_restauracion"), \
+                mock.patch.object(runner, "asegurar_consola", return_value=None), \
+                mock.patch.object(runner, "cambios_ajenos", return_value=[" M Dockerfile"]), \
+                mock.patch.object(runner, "reiniciar_por_http") as reinicio, \
+                mock.patch.object(runner, "_ok"), mock.patch("builtins.print") as imprimir:
+            codigo = runner.main(["--sin-grabar"])
+        reinicio.assert_not_called()
+        self.assertEqual(codigo, 1)
+        self.assertIn("Dockerfile", " ".join(str(c.args[0]) for c in imprimir.call_args_list if c.args))
+
     def test_trivy_vigente(self):
         from datetime import datetime, timezone
         import json
@@ -415,25 +446,95 @@ class Grabacion(unittest.TestCase):
         self.assertIn("grabación", aviso.call_args.args[0])
 
     def test_la_restauracion_no_la_corta_otra_senal(self):
-        # Ya restaurando, un segundo Ctrl+C, un kill o cerrar la terminal no la dejan a medias (28 nov: un SIGTERM
-        # cortó la reposición de Power BI).
+        # Ya restaurando, un segundo Ctrl+C o un kill no la dejan a medias (28 nov: un SIGTERM cortó la reposición de
+        # Power BI). Cerrar la terminal tampoco: solo manda al registro lo que falta escribir.
         import signal
-        from demo.__main__ import atrapar_cortes, proteger_restauracion
+        from demo import __main__ as runner
         previos = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
         self.addCleanup(lambda: [signal.signal(s, h) for s, h in previos.items()])
-        atrapar_cortes()
-        proteger_restauracion()
-        self.assertEqual({signal.getsignal(s) for s in previos}, {signal.SIG_IGN})
+        runner.atrapar_cortes()
+        runner.proteger_restauracion()
+        self.assertEqual({signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)}, {signal.SIG_IGN})
+        self.assertIs(signal.getsignal(signal.SIGHUP), runner._sin_terminal)
 
     def test_cerrar_la_terminal_corta_como_ctrl_c(self):
         import signal
-        from demo.__main__ import atrapar_cortes
+        from demo import __main__ as runner
         previos = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGHUP)}
         self.addCleanup(lambda: [signal.signal(s, h) for s, h in previos.items()])
-        atrapar_cortes()
+        runner.atrapar_cortes()
         for corte in (signal.SIGTERM, signal.SIGHUP):  # se llama al manejador: un SIGHUP real mataría la suite si faltara
-            with self.subTest(corte=corte.name), self.assertRaises(KeyboardInterrupt):
-                signal.getsignal(corte)(corte, None)
+            with self.subTest(corte=corte.name), mock.patch.object(runner, "_sin_terminal") as sin_terminal:
+                with self.assertRaises(KeyboardInterrupt):
+                    signal.getsignal(corte)(corte, None)
+                self.assertEqual(sin_terminal.called, corte == signal.SIGHUP)  # sin terminal, lo que falta va al registro
+
+    def test_cerrar_la_terminal_no_deja_la_restauracion_a_medias(self):
+        # Con la terminal cerrada, cada escritura en ella da EIO: el print de «Interrumpida» y el primero de limpiar()
+        # cortaban la restauración entera. Un proceso real en un pty que se cierra, como la ventana de la terminal.
+        import pty
+        import signal
+        import textwrap
+        import time
+        with tempfile.TemporaryDirectory() as tmp:
+            hecho = Path(tmp) / "restaurado"
+            programa = textwrap.dedent(f"""
+                import time
+                import demo.__main__ as d
+                d.REGISTROS = d.Path({tmp!r})
+                d.atrapar_cortes()
+                try:
+                    print("presentando", flush=True)
+                    time.sleep(30)
+                except KeyboardInterrupt:
+                    print("Interrumpida con Ctrl+C.", flush=True)
+                finally:
+                    d.proteger_restauracion()
+                    print("Restaurando el entorno…", flush=True)
+                    d._ok("Reinicio")
+                    d.Path({str(hecho)!r}).write_text("ok")
+                """)
+            maestro, esclavo = pty.openpty()
+            hijo = subprocess.Popen([sys.executable, "-c", programa], cwd=Path(__file__).resolve().parents[2],
+                                    stdin=esclavo, stdout=esclavo, stderr=esclavo, start_new_session=True)
+            os.close(esclavo)
+            self.addCleanup(lambda: hijo.poll() is None and hijo.kill())
+            leido, limite = b"", time.monotonic() + 30
+            while b"presentando" not in leido and time.monotonic() < limite:
+                leido += os.read(maestro, 1024)
+            os.close(maestro)  # se cierra la ventana de la terminal…
+            hijo.send_signal(signal.SIGHUP)  # …y la shell cuelga a sus trabajos
+            hijo.wait(timeout=30)
+            self.assertTrue(hecho.exists(), "la restauración se cortó al escribir en la terminal cerrada")
+            self.assertIn("Restaurando el entorno", (Path(tmp) / "salida.log").read_text(encoding="utf-8"))
+
+    def test_la_consola_que_lanza_la_demo_no_muere_con_la_terminal(self):
+        # En el grupo de procesos de la terminal, su SIGHUP la mataba sin su finally y dejaba dotnet escuchando en :5080.
+        from demo import __main__ as runner
+        respuestas = iter([False, True])
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(runner, "REGISTROS", Path(tmp)), \
+                mock.patch.object(runner, "_responde", side_effect=lambda _url: next(respuestas)), \
+                mock.patch.object(runner.subprocess, "Popen") as popen:
+            popen.return_value.poll.return_value = None
+            runner.asegurar_consola()
+        self.assertIs(popen.call_args.kwargs.get("start_new_session"), True)
+
+    def test_ctrl_c_mientras_arranca_la_consola_la_detiene(self):
+        # En su propia sesión, el Ctrl+C de la terminal ya no le llega: si corta la espera, la demo la detiene.
+        from demo import __main__ as runner
+
+        def responde(_url):
+            if not popen.called:
+                return False
+            raise KeyboardInterrupt
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(runner, "REGISTROS", Path(tmp)), \
+                mock.patch.object(runner, "_responde", side_effect=responde), \
+                mock.patch.object(runner.subprocess, "Popen") as popen, \
+                mock.patch.object(runner, "detener_consola") as detener:
+            popen.return_value.poll.return_value = None
+            with self.assertRaises(KeyboardInterrupt):
+                runner.asegurar_consola()
+        detener.assert_called_once_with(popen.return_value)
 
 
 class DocumentoMarkdown(unittest.TestCase):
@@ -562,6 +663,24 @@ class PasoApp(unittest.TestCase):
                 mock.patch.object(runner, "_ok"), mock.patch("builtins.print"):
             runner.limpiar(None, True)
         self.assertEqual(orden, [("consola", "POST", "/api/sandbox", {"accion": "detener"}), ("datos", runner.REPO), ("reinicio",)])
+
+    def test_limpiar_no_da_por_reiniciado_lo_que_boards_no_retiro(self):
+        # Sin token de az, el reinicio devuelve Boards «no disponible» sin fallar: la tarea de la demo sigue abierta.
+        from demo import __main__ as runner
+        reinicio = {"corridas": {"archivadas": 4}, "codigo_revertido": [],
+                    "boards": {"disponible": False, "motivo": "az no respondió"}}
+        with mock.patch.object(runner, "_consola", return_value={}), \
+                mock.patch("assessment.demo_reset.clean_sandbox_data", return_value=[]), \
+                mock.patch.object(runner, "reiniciar_por_http", return_value=reinicio), \
+                mock.patch.object(runner.powerbi, "reponer", return_value=None), \
+                mock.patch.object(runner, "rutas_sucias", return_value=[]), \
+                mock.patch.object(runner, "puerto_libre", return_value=True), \
+                mock.patch.object(runner, "_ok") as ok, mock.patch.object(runner, "_aviso") as aviso, \
+                mock.patch("builtins.print") as imprimir:
+            runner.limpiar(None, True)
+        self.assertNotIn("Demo lista para volver a ejecutarse.", [c.args[0] for c in imprimir.call_args_list if c.args])
+        self.assertFalse([c for c in ok.call_args_list if "Boards" in c.args[0]], "Boards sin retirar bajo un ✓")
+        self.assertTrue([c for c in aviso.call_args_list if "Boards" in c.args[0]], aviso.call_args_list)
 
 
 if __name__ == "__main__":

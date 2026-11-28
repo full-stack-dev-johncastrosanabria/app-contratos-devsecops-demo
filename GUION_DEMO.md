@@ -246,16 +246,17 @@ Otras opciones: `--paso-a-paso` (espera «Siguiente» en cada escena), `--sin-vo
 | `<` o `-` · `>` o `+` | Velocidad 0,75× · 1× · 1,25× |
 | P | Paso a paso |
 | Q dos veces | Terminar y restaurar el entorno |
+| Esc | Nada: no llega a la consola, donde dos seguidos cancelarían la evaluación en vivo |
 
-Mover el mouse muestra la barra de control.
+Mover el mouse muestra la barra de control. Al grabar, no lo muevas: la barra saldría en el video.
 
 ### Revisión previa: lo que comprueba antes de presentar
-Consola en `:8050` · reinicio previo (archiva corridas y revierte archivos de una demo anterior) · git limpio en `v1`, `v2`, `v3`, `Dockerfile`, `deploy` y `.github` · `v1`–`v3` compiladas para `:5080` · sesión de Azure CLI · base y escaneo de Trivy · ingreso de ACA (espera hasta 45 s, porque la app escala a cero) · Boards sin tareas de demo abiertas · respaldo del dataset de Power BI · sesión de Power BI · captura de la última corrida verde de GitHub Actions · voz. Si algo imprescindible falla, se detiene con «Revisión previa detenida: …» antes de presentar.
+Consola en `:8050` · cambios sin commit en esas rutas que no dejó una demo (si los hay, se detiene antes de revertirlos: haz commit o stash) · reinicio previo (archiva corridas y revierte archivos de una demo anterior) · git limpio en `v1`, `v2`, `v3`, `Dockerfile`, `deploy` y `.github` · `v1`–`v3` compiladas para `:5080` · sesión de Azure CLI · base y escaneo de Trivy · ingreso de ACA (espera hasta 45 s, porque la app escala a cero) · Boards sin tareas de demo abiertas · respaldo del dataset de Power BI · sesión de Power BI · captura de la última corrida verde de GitHub Actions · voz. Si algo imprescindible falla, se detiene con «Revisión previa detenida: …» antes de presentar.
 
 > En pantalla completa, Power BI se ve unos segundos antes que la consola: la demo abre el reporte en su propia pestaña para heredar la sesión, antes de que empiece la grabación.
 
 ### Al terminar (o si la cortás)
-Al final, con Q dos veces, con Ctrl+C o al cerrar la ventana, la demo detiene `:5080` y borra sus datos, archiva las corridas, revierte la remediación, manda a la papelera de Boards las tareas de la demo y repone el dataset de Power BI. Termina con «Demo lista para volver a ejecutarse.» y deja el registro de tiempos en `demo/.registro/<fecha>.json`.
+Al final, con Q dos veces, con Ctrl+C o al cerrar la ventana o la terminal, la demo detiene `:5080` y borra sus datos, archiva las corridas, revierte la remediación, manda a la papelera de Boards las tareas de la demo y repone el dataset de Power BI. Termina con «Demo lista para volver a ejecutarse.» y deja el registro de tiempos en `demo/.registro/<fecha>.json`; si algo quedó pendiente (por ejemplo, Boards no respondió), lo avisa con «!» en vez de esa línea. Con la terminal cerrada, lo que imprime la restauración queda en `demo/.registro/salida.log`.
 
 ### Presentar por Teams o Zoom
 Ninguno comparte el audio del navegador por defecto: al compartir pantalla, activá **«Incluir sonido»** en Teams o **«Compartir sonido»** en Zoom, o la audiencia no oirá la narración. Con `--sin-voz` no hace falta, porque van subtítulos.
