@@ -312,8 +312,9 @@ class DirectorEnPagina(unittest.TestCase):
         self.assertEqual(list(captura["cajas"]), list(actions.JOBS))
         self.assertEqual(captura["cajas"]["Evidencia xUnit (v2)"], [32, 402, 272, 32])
         self.assertEqual(captura["imagen"].name, "actions-7.png")
-        self.assertEqual((captura["ancho"], captura["alto"]), (1600, 1000))
-        self.assertEqual(struct.unpack(">II", png[16:24]), (3200, 2000), "device scale 2")
+        # 1280×800: en la slide de 1440×900 el texto de GitHub queda en ~12 px en vez de ~9,5 px.
+        self.assertEqual((captura["ancho"], captura["alto"]), (1280, 800))
+        self.assertEqual(struct.unpack(">II", png[16:24]), (2560, 1600), "device scale 2")
 
     def test_captura_de_actions_aborta_si_falta_o_se_tapa_un_job(self):
         from demo import actions
@@ -382,6 +383,44 @@ class DirectorEnPagina(unittest.TestCase):
         self.assertIsNone(corrida.marco)
         self.assertTrue(page.evaluate("() => document.querySelector('#demo-director').shadowRoot.querySelector('.slide').hidden"))
         self.assertEqual(corrida.fallos, [])
+
+
+    def test_documento_muestra_el_informe_mas_reciente_de_la_version(self):
+        import os
+        from demo import __main__ as runner
+        page = self.abrir()
+        corrida = runner.Corrida({"escenas": []}, {"El informe.": {"archivo": None, "duracion": 0.2}}, sin_voz=True, ensayo=True)
+        corrida.page = page
+        paso = {"tipo": "slide", "plantilla": "documento", "informe": "v2", "titulo": "informe.md · v2",
+                "secciones": ["Matriz de criterios evaluados"], "voz": "El informe."}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(runner, "RUNS", Path(tmp)):
+            for nombre, version, marca, cuando in (("a", "v2", "vieja", 1000), ("b", "v2", "nueva", 2000),
+                                                   ("c", "v1", "otra-version", 3000), ("_archivo", "v2", "archivada", 4000)):
+                carpeta = Path(tmp) / nombre
+                carpeta.mkdir()
+                (carpeta / "informe.json").write_text(json.dumps({"ejecucion": {"version": version}}), encoding="utf-8")
+                (carpeta / "informe.md").write_text(
+                    f"# REN-001 · {version}\n\n**{marca}-dictamen**\n\n## Matriz de criterios evaluados\n\n"
+                    f"| Criterio | Veredicto |\n| --- | --- |\n| `REN-001` | `{marca}` |\n\n## Siguiente paso\n\nOtra cosa.\n",
+                    encoding="utf-8")
+                os.utime(carpeta / "informe.json", (cuando, cuando))
+            corrida._slide(paso, {"narracion_s": 0.0})
+            self.assertEqual(corrida.fallos, [])
+            texto = page.evaluate("() => document.querySelector('#demo-director').shadowRoot.querySelector('.s-documento').innerText")
+            self.assertIn("nueva", texto)
+            for fuera in ("vieja", "otra-version", "archivada", "Siguiente paso", "nueva-dictamen"):
+                self.assertNotIn(fuera, texto)
+            corrida._slide({**paso, "informe": "v3"}, {"narracion_s": 0.0})
+        self.assertEqual(len(corrida.fallos), 1)
+        self.assertIn("v3", corrida.fallos[0])
+
+    def test_la_consola_no_abre_pestanas_durante_la_demo(self):
+        # La consola abre una pestaña al lanzar el sandbox y otra para Power BI: le quitarían la pantalla a la demo.
+        from demo.__main__ import SIN_VENTANAS
+        page = self.abrir()
+        page.add_script_tag(content=SIN_VENTANAS)
+        self.assertEqual(page.evaluate("() => ['nextgen_powerbi_web', 'nextgen_sandbox_5080'].map((n) => window.open('about:blank', n))"),
+                         [None, None])
 
 
 if __name__ == "__main__":

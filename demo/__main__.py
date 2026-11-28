@@ -23,7 +23,7 @@ import urllib.request
 from dotenv import dotenv_values
 from playwright.sync_api import Error as ErrorPlaywright, TimeoutError as TiempoAgotado, sync_playwright
 
-from . import actions, guion, powerbi, voz
+from . import actions, documento, guion, powerbi, voz
 
 DEMO = Path(__file__).resolve().parent
 REPO = DEMO.parent
@@ -39,9 +39,10 @@ CACHE_VOZ = DEMO / ".voz"
 REGISTROS = DEMO / ".registro"
 GRABACIONES = Path.home() / "Movies"
 ATAJOS_APAGADOS = 'try { localStorage.setItem("nextgen.atajos", "off"); } catch (e) {}'
-# La demo muestra el reporte en su propia slide: la pestaña que abre la consola le quitaría la pantalla completa.
-SIN_VENTANA_POWERBI = ('(() => { const abrir = window.open; window.open = function (url, nombre, ...resto) {'
-                       ' return nombre === "nextgen_powerbi_web" ? null : abrir.call(window, url, nombre, ...resto); }; })();')
+# La demo enseña el reporte y el portal en sus propias slides: las pestañas que abre la consola le quitarían la pantalla.
+SIN_VENTANAS = ('(() => { const abrir = window.open, propias = ["nextgen_powerbi_web", "nextgen_sandbox_5080"];'
+                ' window.open = function (url, nombre, ...resto) {'
+                ' return propias.includes(nombre) ? null : abrir.call(window, url, nombre, ...resto); }; })();')
 OCULTAR_DIRECTOR = "#demo-director{visibility:hidden!important}"
 VELOCIDAD_ENSAYO = 6  # fuera del menú: la primera tecla de velocidad vuelve a 0,75/1/1,25
 ESPERA_ELEMENTO_MS = 10_000
@@ -104,6 +105,21 @@ def _responde(url: str, timeout: float = 3) -> bool:
             return True
     except OSError:
         return False
+
+
+def informe_reciente(version: str) -> str | None:
+    """informe.md de la evaluación más reciente de la versión; como la consola, salta las carpetas «_» (archivo)."""
+    hallados = []
+    for informe in RUNS.glob("*/informe.json"):
+        md = informe.parent / "informe.md"
+        if informe.parent.name.startswith("_") or not md.is_file():
+            continue
+        try:
+            if (json.loads(informe.read_text(encoding="utf-8")).get("ejecucion") or {}).get("version") == version:
+                hallados.append((informe.stat().st_mtime, md))
+        except (OSError, ValueError):
+            continue
+    return max(hallados)[1].read_text(encoding="utf-8") if hallados else None
 
 
 def puerto_libre(puerto: int) -> bool:
@@ -509,9 +525,15 @@ class Corrida:
     # --- un ejecutor por tipo de paso ---
 
     def _slide(self, paso: dict, fila: dict) -> None:
-        datos = {c: v for c, v in paso.items() if c not in ("tipo", "plantilla", "voz", "motor", "focos")}
+        datos = {c: v for c, v in paso.items() if c not in ("tipo", "plantilla", "voz", "motor", "focos", "informe", "secciones")}
         if paso["plantilla"] == "captura":
             datos = {**self.actions, **datos}
+        if paso.get("informe"):
+            md = informe_reciente(paso["informe"])
+            if md is None:
+                self.fallo(f"no hay ningún informe de {paso['informe']} en assessment/runs")
+                return
+            datos["html"] = documento.a_html(md, paso.get("secciones"))
         self.js("() => __director.foco(null)")
         self.js("([p, d]) => __director.slide(p, d)", [paso["plantilla"], datos])
         focos = paso.get("focos") or []
@@ -680,7 +702,7 @@ def presentar(corrida: Corrida, velocidad: float, paso_a_paso: bool, ventana: bo
             contexto.route("**/__demo/voz/*", servir_voz)
             contexto.route("**/__demo/captura/*", servir_captura)
             contexto.add_init_script(ATAJOS_APAGADOS)
-            contexto.add_init_script(SIN_VENTANA_POWERBI)
+            contexto.add_init_script(SIN_VENTANAS)
             contexto.add_init_script(f"window.__DIRECTOR_CSS = {json.dumps(css)};")
             contexto.add_init_script(director)
             contexto.expose_binding("__demoEvento", corrida.al_evento)

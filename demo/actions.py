@@ -25,7 +25,7 @@ JOBS = (
     "Escaneo IaC, contenedor y SCA (Trivy)",
     "Construir imagen OCI (GHCR)",
 )
-ANCHO, ALTO = 1600, 1000
+ANCHO, ALTO = 1280, 800  # a 1440×900 la slide deja el texto de GitHub en ~12 px; a 1600 quedaba en ~9,5
 LISTA_JOBS = 'nav[aria-label="Workflow run"] a[href*="/job/"]'
 # Caja de cada job que se ve entero y sin nada encima (un banner que lo tape cuenta como que falta).
 CAJAS_JS = """(selector) => {

@@ -197,8 +197,8 @@ class PowerBIDemo(unittest.TestCase):
 
 
 GUION_REAL = Path(__file__).resolve().parents[2] / "demo/guion.yaml"
-IDS_ESCENAS = ["portada", "pregunta", "consola", "caso", "ejecutar", "mientras-corre", "dictamen",
-               "momento-v3", "etapas", "seguridad", "gobernanza", "remediacion", "valor", "cierre"]
+IDS_ESCENAS = ["portada", "pregunta", "caso", "ejecutar", "mientras-corre", "dictamen",
+               "momento-v3", "seguridad", "gobernanza", "remediacion", "valor", "cierre"]
 
 
 class GuionReal(unittest.TestCase):
@@ -215,6 +215,10 @@ class GuionReal(unittest.TestCase):
         d = {t: guion.duracion_estimada(t) for t in guion.lineas(g)}
         self.assertGreaterEqual(guion.proyectar(pasos, d, 1.25, "min", True), 480)
         self.assertLessEqual(guion.proyectar(pasos, d, 0.75, "max", False), 720)
+
+    def test_guion_real_caracteres(self):
+        # Quedan 13.548 caracteres en ElevenLabs: el guion completo (ambos motores) no pasa de 11.500.
+        self.assertLessEqual(sum(len(t) for t in guion.lineas(self.g)), 11_500)
 
 
 class RunnerPrevio(unittest.TestCase):
