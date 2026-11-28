@@ -724,5 +724,25 @@ class BoardsPapelera(unittest.TestCase):
         self.assertIn({"op": "add", "path": "/fields/System.State", "value": "Removed"}, removed_patch[0])
 
 
+
+class ReporteEjecutivo(unittest.TestCase):
+    def test_cada_visual_renombra_sus_campos(self):
+        # Power BI muestra el nombre crudo del campo (veredicto_ren001) salvo que el visual lo renombre en
+        # columnProperties; NativeReferenceName no se ve en pantalla.
+        import io
+        with zipfile.ZipFile(io.BytesIO(_build_executive_pbix("ds-1234"))) as zf:
+            layout = json.loads(zf.read("Report/Layout").decode("utf-16-le"))
+        nombres = {}
+        for vc in layout["sections"][0]["visualContainers"]:
+            visual = json.loads(vc["config"])["singleVisual"]
+            props = visual.get("columnProperties") or {}
+            for campo in visual["prototypeQuery"]["Select"]:
+                nombres.setdefault(campo["Name"], set()).add((props.get(campo["Name"]) or {}).get("displayName"))
+        self.assertEqual(nombres["Corridas.veredicto_ren001"], {"Dictamen REN-001", "Dictamen"})
+        self.assertEqual(nombres["Corridas.fecha_utc"], {"Fecha UTC"})
+        self.assertEqual(nombres["Corridas.version"], {"Entrega"})
+        self.assertEqual(nombres["Corridas.Total Corridas"], {"Corridas Auditadas", "Corridas"})
+
+
 if __name__ == "__main__":
     unittest.main()
