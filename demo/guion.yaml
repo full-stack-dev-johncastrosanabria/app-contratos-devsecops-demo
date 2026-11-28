@@ -27,7 +27,7 @@ escenas:
           Cuando un equipo despliega una versión nueva, solemos ver los checks en verde y dar por hecho que
           todo está cubierto. Pero si un auditor pregunta qué evidencia tenemos de que cumple los criterios
           de negocio, pasó los controles de seguridad y no degradó el ambiente, la respuesta está repartida
-          entre Boards, GitHub, los pipelines y Azure Monitor. Reconstruirla suele llevar horas.
+          entre Boards, GitHub, los pipelines y Azure Monitor.
 
   - id: consola
     titulo: La consola
@@ -45,6 +45,7 @@ escenas:
           Conecta las herramientas que el equipo ya usa: Azure Boards, GitHub, los escáneres de seguridad y
           Power BI.
       - tipo: narrar
+        opcional: true
         foco: "#controls"
         etiqueta: Alcance y motor
         voz: Y desde aquí elegimos qué entregas evaluar y con qué motor.
@@ -257,6 +258,7 @@ escenas:
       - tipo: clic
         selector: "#inspector-next-btn"
       - tipo: narrar
+        opcional: true
         voz: "Desplegar: que la revisión activa en Container Apps corresponda al commit evaluado."
       - tipo: clic
         selector: "#inspector-next-btn"
@@ -271,11 +273,13 @@ escenas:
       - tipo: clic
         selector: "#inspector-next-btn"
       - tipo: narrar
+        opcional: true
         voz: "Optimizar con IA: la remediación gobernada, que veremos enseguida."
       # Después de la etapa 8 el inspector vuelve a la 1; termina en la 3, donde empieza la escena siguiente.
       - tipo: clic
         selector: "#inspector-next-btn"
       - tipo: narrar
+        opcional: true
         voz: "Y de vuelta al inicio. Planificar: la historia en Boards con sus criterios de aceptación."
       - tipo: clic
         selector: "#inspector-next-btn"
@@ -421,10 +425,25 @@ escenas:
         foco: "#value-kpis"
         etiqueta: Valor continuo
         voz: "Cada corrida alimenta estos indicadores: controles con evidencia, criterios vigentes y el ciclo en Boards."
-      - tipo: narrar
-        foco: "#open-powerbi-web-btn"
-        etiqueta: Power BI
-        voz: Y con un clic se sincronizan con Power BI, para que el comité de release los siga en su propio tablero.
+      - tipo: clic
+        selector: "#open-powerbi-web-btn"
+        voz: Y con un clic, la consola los publica en Power BI.
+      - tipo: esperar
+        condicion: >-
+          /^Reporte ejecutivo actualizado en Power BI Web/.test(document.querySelector('#status').textContent) &&
+          document.querySelector('#status-banner').dataset.tone === 'pass'
+        max_s: 60
+        espera_s: [3, 8]
+        en_vivo: la consola sincroniza las corridas con Power BI
+        voz_mientras: Lo hace con la API de Power BI, sin exportar archivos ni copiar hojas de cálculo.
+      # El reporte se ve dentro de la demo; la pestaña que abriría la consola queda bloqueada (SIN_VENTANA_POWERBI).
+      - tipo: reporte
+        titulo: Reporte ejecutivo de Power BI
+        max_s: 60
+        espera_s: [4, 12]
+        voz: >-
+          Este es el reporte ejecutivo en Power BI, con las corridas de esta demo: las auditadas, el
+          cumplimiento de REN-001 y la evidencia determinista. El comité de release lo sigue sin abrir la consola.
       - tipo: narrar
         opcional: true
         voz: Las mismas corridas también se exportan en CSV y en JSON para Microsoft Fabric.

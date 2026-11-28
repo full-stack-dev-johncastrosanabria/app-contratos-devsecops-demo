@@ -22,3 +22,4 @@ assessment/runs/
 # Demo automatizada: caché de voz y registros de tiempo
 demo/.voz/
 demo/.registro/
+demo/.perfil/

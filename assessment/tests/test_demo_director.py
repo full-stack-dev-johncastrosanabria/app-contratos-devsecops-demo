@@ -1,7 +1,9 @@
 """Pruebas del director de la demo en un Chrome headless real (sin servidor de la consola)."""
 import json
 from pathlib import Path
+import tempfile
 import unittest
+from unittest import mock
 
 DEMO = Path(__file__).resolve().parents[2] / "demo"
 PAGINA = "<!doctype html><html lang='es'><body style='margin:0'><input id='campo'><div id='objetivo' style='width:240px;height:80px;margin:300px'>objetivo</div></body></html>"
@@ -120,6 +122,50 @@ class DirectorEnPagina(unittest.TestCase):
         corrida.page = page
         corrida._narrar({"tipo": "narrar", "voz": "Mira esto.", "foco": "#tarde"}, {"narracion_s": 0.0})
         self.assertEqual(corrida.fallos, [])
+
+    def test_reporte_ocupa_la_pantalla_sin_tapar_la_barra(self):
+        for ancho, alto in ((1440, 900), (1920, 1080)):
+            with self.subTest(viewport=f"{ancho}x{alto}"):
+                page = self.abrir(ancho, alto)
+                page.evaluate("() => __director.slide('reporte', {url: 'about:blank', titulo: 'Reporte ejecutivo de Power BI'})")
+                d = page.evaluate("""() => {
+                    const raiz = document.querySelector('#demo-director').shadowRoot;
+                    const marco = raiz.querySelector('.slide iframe');
+                    const caja = (el) => { const b = el.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom]; };
+                    return {src: marco.getAttribute('src'), tab: marco.tabIndex, punteros: getComputedStyle(marco).pointerEvents,
+                            titulo: marco.title, marco: caja(marco), barra: caja(raiz.querySelector('.barra')),
+                            membrete: caja(raiz.querySelector('.membrete'))};
+                }""")
+                # El iframe nunca toma el foco: Espacio, flechas y Q siguen llegando al director.
+                self.assertEqual((d["src"], d["tab"], d["punteros"], d["titulo"]),
+                                 ("about:blank", -1, "none", "Reporte ejecutivo de Power BI"))
+                izq, arriba, der, abajo = d["marco"]
+                self.assertLessEqual(abajo, d["barra"][1], f"la barra tapa el reporte: {d}")
+                self.assertLessEqual(d["membrete"][3], arriba, f"el membrete pisa el reporte: {d}")
+                self.assertGreater(der - izq, 0.9 * ancho)
+                self.assertGreater(abajo - arriba, 0.75 * alto)
+
+    def test_reporte_inserta_power_bi_espera_que_dibuje_y_narra(self):
+        from demo import powerbi
+        from demo.__main__ import Corrida
+        page = self.abrir()
+        pedidas = []
+
+        def power_bi_falso(route):
+            pedidas.append(route.request.url)
+            route.fulfill(content_type="text/html", body=(
+                "<!doctype html><body><script>setTimeout(() => { const v = document.createElement('visual-container');"
+                " v.style.cssText = 'display:block;width:200px;height:80px'; document.body.append(v); }, 300)</script></body>"))
+        page.route("https://app.powerbi.com/**", power_bi_falso)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(powerbi, "ESTADO", Path(tmp) / "estado.json"):
+            powerbi.ESTADO.write_text(json.dumps({"report_id": "rep-1"}), encoding="utf-8")
+            corrida = Corrida({"escenas": []}, {"Este es el reporte.": {"archivo": None, "duracion": 0.2}}, sin_voz=True, ensayo=True)
+            corrida.page, corrida.inquilino = page, "t-1"
+            corrida._reporte({"tipo": "reporte", "voz": "Este es el reporte.", "max_s": 10, "espera_s": [1, 3]},
+                             {"narracion_s": 0.0, "espera_s": 0.0})
+        self.assertEqual(corrida.fallos, [])
+        self.assertTrue(pedidas and "reportId=rep-1" in pedidas[0] and "ctid=t-1" in pedidas[0], pedidas)
+        self.assertTrue(page.evaluate("() => document.querySelector('#demo-director').shadowRoot.querySelector('.slide').hidden"))
 
     def test_layout_sin_solapes(self):
         for ancho, alto in ((1440, 900), (1920, 1080)):

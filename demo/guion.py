@@ -10,13 +10,15 @@ TIPOS: dict[str, tuple[str, ...]] = {
     "elegir": ("selector", "valor"),
     "escribir": ("selector", "texto"),
     "esperar": ("condicion", "max_s", "espera_s"),
+    "reporte": ("voz", "max_s", "espera_s"),  # Power BI insertado: espera a que se dibuje y narra encima
 }
 MOTORES = ("agente", "solo-evidencia")
 VENTANA_S = (480, 720)
 LIMITE_S = 690
 CARACTERES_POR_S = 17  # ritmo medido de Dalia a 1×
-OVERHEAD = {"slide": 1.5, "narrar": 0.6, "clic": 1.2, "elegir": 1.0, "escribir": 0.0, "esperar": 0.0}
+OVERHEAD = {"slide": 1.5, "narrar": 0.6, "clic": 1.2, "elegir": 1.0, "escribir": 0.0, "esperar": 0.0, "reporte": 1.0}
 TECLEO_S = 0.06
+ESPERAS = ("esperar", "reporte")  # pasos con una espera real que «voz_mientras» puede cubrir
 
 
 def cargar(ruta: Path) -> dict:
@@ -48,7 +50,7 @@ def validar(guion: dict) -> list[str]:
             if paso.get("opcional") and tipo != "narrar":
                 errores.append(f"{donde}: «opcional» solo vale en «narrar».")
             espera = paso.get("espera_s")
-            if tipo == "esperar" and espera and not (isinstance(espera, list) and len(espera) == 2 and espera[0] <= espera[1]):
+            if tipo in ESPERAS and espera and not (isinstance(espera, list) and len(espera) == 2 and espera[0] <= espera[1]):
                 errores.append(f"{donde}: «espera_s» debe ser [min, max].")
     return errores
 
@@ -89,14 +91,15 @@ def proyectar(pasos: list[dict], duraciones: dict[str, float], velocidad: float,
     total = 0.0
     for paso in pasos:
         tipo = paso["tipo"]
-        if tipo == "esperar":
+        if paso.get("opcional") and not opcionales:
+            continue
+        if tipo in ESPERAS:
             minimo, maximo = paso["espera_s"]
             espera = {"min": minimo, "max": maximo}.get(esperas, (minimo + maximo) / 2)
             cubierta = sum(duraciones[t] for t in lista(paso.get("voz_mientras")))
             total += max(espera, cubierta / velocidad)
-            continue
-        if paso.get("opcional") and not opcionales:
-            continue
+            if tipo == "esperar":
+                continue
         narracion = sum(duraciones[t] for t in lista(paso.get("voz")))
         accion = OVERHEAD[tipo] + (TECLEO_S * len(paso.get("texto", "")) if tipo == "escribir" else 0.0)
         total += (narracion + accion) / velocidad

@@ -8,7 +8,7 @@ import unittest
 from unittest import mock
 import urllib.error
 
-from demo import guion
+from demo import guion, powerbi
 
 MINIMO = {
     "voz": "es-MX-DaliaMultilingualNeural",
@@ -41,6 +41,16 @@ class GuionModelo(unittest.TestCase):
             guion.proyectar(pasos, d, 0.5, "max", True),
             (2 + o) / 0.5 + max(20, 1 / 0.5) + (1 + o) / 0.5,
         )
+
+    def test_reporte_espera_que_se_dibuje_y_luego_narra(self):
+        reporte = {"tipo": "reporte", "voz": "x" * 17, "voz_mientras": ["y" * 34], "max_s": 60, "espera_s": [10, 20]}
+        g = deepcopy(MINIMO)
+        g["escenas"][0]["pasos"] = [reporte, {"tipo": "reporte", "voz": "z", "espera_s": [9, 3]}]
+        self.assertEqual(guion.validar(g), ["a · paso 2: «reporte» necesita «max_s».", "a · paso 2: «espera_s» debe ser [min, max]."])
+        d = {t: guion.duracion_estimada(t) for t in guion.voces(reporte)}
+        o = guion.OVERHEAD["reporte"]
+        self.assertAlmostEqual(guion.proyectar([reporte], d, 1, "min"), 10 + 1 + o)
+        self.assertAlmostEqual(guion.proyectar([reporte], d, 0.05, "max"), 2 / 0.05 + (1 + o) / 0.05)
 
     def test_filtrar_motor(self):
         g = deepcopy(MINIMO)
@@ -135,6 +145,55 @@ class VozCache(unittest.TestCase):
             clip = Path(tmp) / "x.aiff"
             subprocess.run(["say", "-o", str(clip), "hola"], check=True)
             self.assertTrue(0 < voz.duracion_mp3(clip) < 3)
+
+
+class PowerBIDemo(unittest.TestCase):
+    """Respaldo del dataset alrededor de la demo y URL del reporte insertado (sin red)."""
+
+    def api(self, filas_dax):
+        self.llamadas = []
+
+        def responder(metodo, url, token, cuerpo=None, timeout=20):
+            self.llamadas.append((metodo, url, cuerpo))
+            if url.endswith("/datasets"):
+                return {"value": [{"id": "ds-1", "name": powerbi.DATASET_NAME}]}
+            if url.endswith("/executeQueries"):
+                return {"results": [{"tables": [{"rows": filas_dax}]}]}
+            return {}
+        return responder
+
+    def test_respaldo_y_reposicion_ida_y_vuelta(self):
+        dax = [{"Corridas[version]": "v1", "Corridas[fecha_utc]": "2026-11-26T15:27:39", "Corridas[modo]": None}]
+        with (tempfile.TemporaryDirectory() as tmp, mock.patch("demo.powerbi._az_token", return_value="tok"),
+              mock.patch("demo.powerbi._pbi_json", side_effect=self.api(dax))):
+            ruta = Path(tmp) / "previo.json"
+            self.assertEqual(powerbi.respaldar(ruta), 1)
+            self.llamadas.clear()
+            self.assertEqual(powerbi.reponer(ruta), 1)
+            self.assertFalse(ruta.exists())
+        self.assertEqual([m for m, u, _ in self.llamadas if u.endswith("/datasets/ds-1/tables/Corridas/rows")], ["DELETE", "POST"])
+        post = next(c for m, u, c in self.llamadas if m == "POST" and u.endswith("/rows"))
+        self.assertEqual(post, {"rows": [{"version": "v1", "fecha_utc": "2026-11-26T15:27:39Z", "modo": None}]})
+
+    def test_respaldo_pendiente_no_se_pisa(self):
+        # Si la corrida anterior murió tras sincronizar, el dataset tiene filas de demo: vale el respaldo viejo.
+        with (tempfile.TemporaryDirectory() as tmp, mock.patch("demo.powerbi._az_token", return_value="tok"),
+              mock.patch("demo.powerbi._pbi_json") as api):
+            ruta = Path(tmp) / "previo.json"
+            ruta.write_text(json.dumps({"dataset_id": "ds-1", "filas": [{"version": "v1"}, {"version": "v2"}]}))
+            self.assertEqual(powerbi.respaldar(ruta), 2)
+            self.assertIsNone(powerbi.reponer(Path(tmp) / "no-existe.json"))
+        api.assert_not_called()
+
+    def test_url_del_reporte_insertado(self):
+        import base64
+        from urllib.parse import parse_qs, urlparse
+        carga = base64.urlsafe_b64encode(json.dumps({"tid": "t-123"}).encode()).decode().rstrip("=")
+        self.assertEqual(powerbi.inquilino(f"cabecera.{carga}.firma"), "t-123")
+        url = powerbi.url_embebida("rep-1", "t-123")
+        self.assertTrue(url.startswith("https://app.powerbi.com/reportEmbed?"))
+        q = parse_qs(urlparse(url).query)
+        self.assertEqual((q["reportId"], q["autoAuth"], q["ctid"]), (["rep-1"], ["true"], ["t-123"]))
 
 
 GUION_REAL = Path(__file__).resolve().parents[2] / "demo/guion.yaml"

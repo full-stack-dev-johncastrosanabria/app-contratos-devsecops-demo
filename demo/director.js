@@ -846,6 +846,10 @@
         return h("li", { class: "entra", "data-destacar": Boolean(paso.destacar) }, h("span", { class: "nodo" }), h("span", {}, paso.texto));
       }))),
 
+    // Power BI insertado: el iframe no toma foco ni punteros, así el teclado sigue siendo de la demo.
+    reporte: ({ url, titulo = "Reporte de Power BI" }) => h("div", { class: "s-reporte" },
+      h("iframe", { class: "marco-reporte entra", src: url, title: titulo, tabindex: "-1" })),
+
     cierre: ({ tesis = [], cta }) => h("div", { class: "s-cierre" },
       h("ul", { class: "tesis" }, tesis.map((t) => h("li", { class: "entra" }, h("span", { class: "nodo" }), h("p", {}, t)))),
       cta && h("p", { class: "cta entra" }, icono("flecha"), h("span", {}, cta))),

@@ -22,7 +22,7 @@ import urllib.request
 from dotenv import dotenv_values
 from playwright.sync_api import Error as ErrorPlaywright, TimeoutError as TiempoAgotado, sync_playwright
 
-from . import guion, voz
+from . import guion, powerbi, voz
 
 DEMO = Path(__file__).resolve().parent
 REPO = DEMO.parent
@@ -36,6 +36,9 @@ CACHE_VOZ = DEMO / ".voz"
 REGISTROS = DEMO / ".registro"
 GRABACIONES = Path.home() / "Movies"
 ATAJOS_APAGADOS = 'try { localStorage.setItem("nextgen.atajos", "off"); } catch (e) {}'
+# La demo muestra el reporte en su propia slide: la pestaña que abre la consola le quitaría la pantalla completa.
+SIN_VENTANA_POWERBI = ('(() => { const abrir = window.open; window.open = function (url, nombre, ...resto) {'
+                       ' return nombre === "nextgen_powerbi_web" ? null : abrir.call(window, url, nombre, ...resto); }; })();')
 OCULTAR_DIRECTOR = "#demo-director{visibility:hidden!important}"
 VELOCIDAD_ENSAYO = 6  # fuera del menú: la primera tecla de velocidad vuelve a 0,75/1/1,25
 ESPERA_ELEMENTO_MS = 10_000
@@ -234,6 +237,22 @@ def revision_previa(motor: str) -> None:
         _aviso(f"No se pudo calentar el escaneo de vulnerabilidades ({exc})")
 
 
+def preparar_powerbi() -> str:
+    """Respalda el dataset y comprueba la sesión del perfil; devuelve el tenant con que se inserta el reporte."""
+    try:
+        inquilino = powerbi.inquilino(powerbi.token())
+        report_id = json.loads(powerbi.ESTADO.read_text(encoding="utf-8"))["report_id"]
+        filas = powerbi.respaldar()
+    except (RuntimeError, OSError, ValueError, KeyError) as exc:  # HTTPError y URLError son OSError
+        raise Abortar(f"no se pudo respaldar el dataset de Power BI ({exc}); sin respaldo la demo no lo sincroniza")
+    _ok(f"Dataset de Power BI respaldado ({filas} filas): al restaurar vuelve a quedar como estaba")
+    problema = powerbi.problema_sesion(powerbi.url_embebida(report_id, inquilino), CONSOLA)
+    if problema:
+        raise Abortar(f"{problema}. Inicia sesión una vez con «python -m demo --iniciar-sesion» y vuelve a lanzar la demo.")
+    _ok("Sesión de Power BI vigente en el perfil de la demo")
+    return inquilino
+
+
 def preparar_voz(g: dict, sin_voz: bool) -> dict:
     """Tu voz de ElevenLabs si assessment/.env tiene ELEVENLABS_VOICE_ID; si no, la voz neural del guion."""
     voz_propia = _ajuste("ELEVENLABS_VOICE_ID")
@@ -323,6 +342,7 @@ class Corrida:
         self.k = -1
         self.donde = ""
         self.ultimo_clic = time.monotonic()
+        self.inquilino: str | None = None  # tenant de Entra para insertar el reporte de Power BI
 
     def previsto(self) -> dict[str, float]:
         """Total estimado por velocidad: las opcionales suenan mientras el total no pase de LIMITE_S."""
@@ -486,9 +506,12 @@ class Corrida:
         loc.fill("")
         loc.press_sequentially(str(paso["texto"]), delay=guion.TECLEO_S * 1000 / self.estado()["velocidad"])
 
-    def _esperar(self, paso: dict, fila: dict) -> None:
+    def _esperar(self, paso: dict, fila: dict, listo=None,
+                 aviso: str = "La consola sigue trabajando · Espacio para continuar") -> None:
         inicio = self.estado()["transcurrido_s"]
-        condicion = f"() => {{ try {{ return Boolean({paso['condicion']}); }} catch (e) {{ return false; }} }}"
+        if listo is None:
+            condicion = f"() => {{ try {{ return Boolean({paso['condicion']}); }} catch (e) {{ return false; }} }}"
+            listo = lambda: self.js(condicion)
         relleno = guion.lista(paso.get("relleno"))
         reintentos = 0
 
@@ -504,14 +527,14 @@ class Corrida:
         for texto in guion.lista(paso.get("voz_mientras")):
             reintentar()
             self.decir(texto, fila)
-        while not self.js(condicion):
+        while not listo():
             reintentar()
             if time.monotonic() - self.ultimo_clic >= paso["max_s"]:
                 if self.ensayo:
                     self.fallo(f"la condición siguió pendiente {paso['max_s']} s")
                     break
                 # Nunca se cancela una evaluación: la demo se pausa y el presentador decide cuándo seguir.
-                self.js("() => { __director.pausar(); __director.aviso('La consola sigue trabajando · Espacio para continuar'); }")
+                self.js("(a) => { __director.pausar(); __director.aviso(a); }", aviso)
                 self.turno()
                 break
             if relleno:
@@ -521,6 +544,26 @@ class Corrida:
         self.js("() => __director.enVivo(null)")
         fila["espera_s"] += self.estado()["transcurrido_s"] - inicio
 
+    def _reporte(self, paso: dict, fila: dict) -> None:
+        """Power BI dentro de la demo: la slide inserta el reporte que la consola acaba de sincronizar."""
+        estado = json.loads(powerbi.ESTADO.read_text(encoding="utf-8"))
+        url = powerbi.url_embebida(estado["report_id"], self.inquilino)
+        self.js("() => __director.foco(null)")
+        self.js("([u, t]) => __director.slide('reporte', {url: u, titulo: t})", [url, paso.get("titulo") or "Reporte de Power BI"])
+        self.ultimo_clic = time.monotonic()  # max_s cuenta desde que se pide el reporte
+        visual = self.page.frame_locator("#demo-director .marco-reporte").locator(powerbi.VISUAL).first
+
+        def dibujado() -> bool:
+            try:
+                return visual.is_visible()
+            except ErrorPlaywright:  # el iframe todavía navega
+                return False
+
+        self._esperar({**paso, "en_vivo": paso.get("en_vivo") or "Power BI dibuja el reporte"}, fila, listo=dibujado,
+                      aviso="Power BI no termina de dibujar el reporte · Espacio para continuar")
+        self.decir(paso["voz"], fila)
+        self.js("() => __director.ocultarSlide()")
+
 
 def presentar(corrida: Corrida, velocidad: float, paso_a_paso: bool, ventana: bool, grabacion: Path | None) -> None:
     css = (DEMO / "director.css").read_text(encoding="utf-8")
@@ -528,16 +571,19 @@ def presentar(corrida: Corrida, velocidad: float, paso_a_paso: bool, ventana: bo
     argumentos = ["--autoplay-policy=no-user-gesture-required", "--window-size=1440,900" if ventana else "--kiosk"]
     grabadora = None
     with sync_playwright() as pw:
-        navegador = pw.chromium.launch(channel="chrome", headless=False, args=argumentos,
-                                       ignore_default_args=["--enable-automation"])
+        contexto = powerbi.abrir_perfil(pw, argumentos)  # persistente: conserva la sesión de Power BI
         try:
-            contexto = navegador.new_context(no_viewport=True, bypass_csp=True)
             contexto.route("**/__demo/voz/*", servir_voz)
             contexto.add_init_script(ATAJOS_APAGADOS)
+            contexto.add_init_script(SIN_VENTANA_POWERBI)
             contexto.add_init_script(f"window.__DIRECTOR_CSS = {json.dumps(css)};")
             contexto.add_init_script(director)
             contexto.expose_binding("__demoEvento", corrida.al_evento)
-            corrida.page = contexto.new_page()
+            corrida.page = contexto.pages[0] if contexto.pages else contexto.new_page()
+            # Como en un perfil nuevo: la consola arranca sin nada guardado de corridas anteriores.
+            cdp = contexto.new_cdp_session(corrida.page)
+            cdp.send("Storage.clearDataForOrigin", {"origin": CONSOLA, "storageTypes": "all"})
+            cdp.detach()
             corrida.page.goto(CONSOLA + "/", wait_until="load")
             try:
                 corrida.page.wait_for_load_state("networkidle", timeout=15_000)
@@ -562,7 +608,7 @@ def presentar(corrida: Corrida, velocidad: float, paso_a_paso: bool, ventana: bo
             if grabadora:
                 detener_grabacion(grabadora)
             try:
-                navegador.close()
+                contexto.close()
             except ErrorPlaywright:
                 pass
 
@@ -581,6 +627,14 @@ def limpiar(consola: subprocess.Popen | None, tocado: bool) -> None:
         reiniciado = True
     except Exception as exc:  # se informa y se sigue: la próxima corrida empieza reiniciando
         _aviso(f"El reinicio falló ({exc}). Vuelve a lanzar la demo: su reinicio previo lo completa.")
+        reiniciado = False
+    try:
+        repuestas = powerbi.reponer()
+        if repuestas is not None:
+            _ok(f"Power BI repuesto: el dataset vuelve a sus {repuestas} filas")
+    except Exception as exc:  # el respaldo queda en disco y la próxima corrida lo repone
+        _aviso(f"No se pudo reponer Power BI ({exc}). El respaldo sigue en "
+               f"{powerbi.RESPALDO.relative_to(REPO)}: la próxima demo lo repone al terminar.")
         reiniciado = False
     sucias = rutas_sucias(REPO)
     if sucias:
@@ -621,6 +675,8 @@ def _argumentos(argv: list[str] | None) -> argparse.Namespace:
                    help="recorrido rápido (×6, solo evidencia, sin audio ni grabación); genera los clips que falten salvo con --sin-voz")
     p.add_argument("--ventana", action="store_true", help="ventana de 1440×900 en vez de pantalla completa")
     p.add_argument("--guion", type=Path, default=DEMO / "guion.yaml")
+    p.add_argument("--iniciar-sesion", action="store_true",
+                   help="abre Power BI en el perfil de la demo para iniciar sesión una vez (con MFA) y sale")
     return p.parse_args(argv)
 
 
@@ -630,6 +686,9 @@ def _como_ctrl_c(_signum, _frame):
 
 def main(argv: list[str] | None = None) -> int:
     args = _argumentos(argv)
+    if args.iniciar_sesion:
+        powerbi.iniciar_sesion()
+        return 0
     if args.ensayo:
         args.motor, args.sin_grabar = "solo-evidencia", True  # la voz se genera (salvo --sin-voz) pero no suena
     g = guion.cargar(args.guion)
@@ -649,6 +708,7 @@ def main(argv: list[str] | None = None) -> int:
         tocado = True
         _ok("Reinicio previo · " + resumen_reinicio(reiniciar_por_http()))
         revision_previa(args.motor)
+        inquilino = preparar_powerbi()
         clips = preparar_voz(g, args.sin_voz)
         if not args.sin_grabar:
             if puede_grabar():
@@ -658,6 +718,7 @@ def main(argv: list[str] | None = None) -> int:
                 _aviso("Sin permiso de Grabación de pantalla para esta terminal: la demo no se grabará "
                        "(Ajustes del Sistema → Privacidad y seguridad → Grabación de pantalla y audio del sistema)")
         corrida = Corrida(g, clips, args.sin_voz or args.ensayo, args.ensayo)
+        corrida.inquilino = inquilino
         print("Presentando · Espacio pausa · → siguiente · < > velocidad · P paso a paso · Q Q terminar", flush=True)
         presentar(corrida, VELOCIDAD_ENSAYO if args.ensayo else args.velocidad, args.paso_a_paso, args.ventana, grabacion)
         if args.ensayo:
