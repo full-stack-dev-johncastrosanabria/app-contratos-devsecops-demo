@@ -112,6 +112,51 @@ class DirectorEnPagina(unittest.TestCase):
             page.wait_for_function("() => window.__fin !== null", timeout=3000)
             self.assertLess(page.evaluate("() => window.__fin"), 500, duracion)
 
+    POSICION = "() => document.querySelector('#demo-director').shadowRoot.querySelector('.subtitulos').dataset.posicion"
+    BAJO = ("() => document.body.insertAdjacentHTML('beforeend', \"<div id='bajo' style='position:fixed;left:40px;bottom:40px;"
+            "width:300px;height:120px'>bajo</div>\")")
+
+    def test_apagar_el_foco_devuelve_los_subtitulos_abajo(self):
+        page = self.abrir()
+        page.evaluate(self.BAJO)
+        page.evaluate("() => __director.foco('#bajo')")
+        page.wait_for_function(f"({self.POSICION})() === 'arriba'")
+        page.evaluate("() => __director.foco(null)")
+        page.wait_for_timeout(600)  # más que el fundido del foco (360 ms): el seguimiento ya no la sube
+        self.assertEqual(page.evaluate(self.POSICION), "abajo")
+
+    def test_slide_sobre_un_foco_deja_los_subtitulos_abajo_y_al_salir_vuelven_a_esquivarlo(self):
+        page = self.abrir()
+        page.evaluate(self.BAJO)
+        page.evaluate("() => __director.foco('#bajo')")
+        page.wait_for_function(f"({self.POSICION})() === 'arriba'")
+        page.evaluate("() => __director.slide('pregunta', {pregunta: '¿?', remate: 'r', fuentes: ['GitHub']})")
+        page.wait_for_timeout(300)
+        self.assertEqual(page.evaluate(self.POSICION), "abajo")  # el foco quedó bajo la slide: no hay nada que esquivar
+        page.evaluate("() => __director.ocultarSlide()")
+        page.wait_for_function(f"({self.POSICION})() === 'arriba'", timeout=2000)
+
+    def test_un_foco_alto_queda_bajo_el_chip_en_vivo_y_con_su_etiqueta_a_la_vista(self):
+        page = self.abrir()
+        page.evaluate("() => document.body.insertAdjacentHTML('beforeend',"
+                      " \"<div id='alto' style='margin:600px 40px 1200px;height:800px;background:#eee'>matriz</div>\")")
+        page.evaluate("() => __director.enVivo('los agentes evalúan las tres entregas', {agentes: true})")
+        page.evaluate("() => __director.foco('#alto', {etiqueta: 'Matriz de evaluación'})")
+        d = page.evaluate("""() => {
+            const raiz = document.querySelector('#demo-director').shadowRoot;
+            return {alto: document.querySelector('#alto').getBoundingClientRect().top,
+                    chip: raiz.querySelector('.envivo').getBoundingClientRect().bottom,
+                    etiqueta: raiz.querySelector('.foco-etiqueta').getBoundingClientRect().top};
+        }""")
+        self.assertGreater(d["chip"], 0, d)
+        self.assertGreaterEqual(d["alto"], d["chip"], f"el chip «En vivo» tapa la cabecera del foco: {d}")
+        self.assertGreaterEqual(d["etiqueta"], 0, f"la etiqueta del foco queda fuera de la pantalla: {d}")
+
+    def test_la_pagina_no_muestra_su_barra_de_desplazamiento_junto_a_las_slides(self):
+        # Chrome headless ya oculta las barras (--hide-scrollbars): se comprueba el estilo que las oculta en la ventana real.
+        page = self.abrir()
+        self.assertEqual(page.evaluate("() => getComputedStyle(document.documentElement).scrollbarWidth"), "none")
+
     def test_pregunta_pone_el_logo_de_cada_fuente(self):
         page = self.abrir()
         page.evaluate("() => __director.slide('pregunta', {pregunta: '¿?', remate: 'r', fuentes: [{nombre: 'GitHub', logo: '/logos/github.svg'}, 'Sin logo']})")

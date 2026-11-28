@@ -8,6 +8,7 @@
   const VELOCIDADES = [0.75, 1, 1.25];
   const EXPO = "cubic-bezier(0.16, 1, 0.3, 1)";
   const RESERVA_ABAJO = 196; // franja inferior para subtítulos y barra
+  const MARGEN_ARRIBA = 80; // un foco alto queda bajo el chip «En vivo» y con sitio para su etiqueta encima
   const reducido = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const est = {
@@ -392,6 +393,8 @@
     const host = document.createElement("demo-director");
     host.id = "demo-director";
     host.style.cssText = "position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:block";
+    // Sin la barra de la página: junto a una slide oscura se veía como una franja clara; la demo desplaza sola.
+    document.documentElement.style.scrollbarWidth = "none";
     const sombra = host.attachShadow({ mode: "open" });
     sombra.innerHTML = BASE;
     const css = String(window.__DIRECTOR_CSS || "");
@@ -597,8 +600,16 @@
     if (!r) return;
     const visible = r.y >= 8 && r.y + r.h <= innerHeight - RESERVA_ABAJO;
     if (visible) return;
-    els[0].scrollIntoView({ behavior: reducido() ? "auto" : "smooth", block: r.h > innerHeight * 0.6 ? "start" : "center" });
-    await rectEstable(els, 180);
+    const alto = r.h > innerHeight * 0.6;
+    const el = els[0];
+    const margen = el.style.scrollMarginTop;
+    if (alto) el.style.scrollMarginTop = `${MARGEN_ARRIBA}px`;
+    try {
+      el.scrollIntoView({ behavior: reducido() ? "auto" : "smooth", block: alto ? "start" : "center" });
+      await rectEstable(els, 180);
+    } finally {
+      el.style.scrollMarginTop = margen;
+    }
   }
 
   function esquivar(r) {
@@ -632,7 +643,8 @@
       s.width = `${r.w}px`;
       s.height = `${r.h}px`;
       colocarEtiqueta(r);
-      esquivar(r);
+      // Solo se esquiva un foco que el público ve: no uno que se está apagando ni uno que quedó bajo una slide.
+      if (ui.veloFoco.hasAttribute("data-visible") && (ui.slide.hidden || ui.veloFoco.hasAttribute("data-sobre-slide"))) esquivar(r);
     }
     foco.raf = requestAnimationFrame(seguirFoco);
   }
@@ -1051,6 +1063,7 @@
       if (!el.style.getPropertyValue("--i")) el.style.setProperty("--i", String(i));
     });
     ui.cursor.hidden = true;
+    ui.subtitulos.dataset.posicion = "abajo"; // un foco de la consola queda tapado por la slide
     ui.slide.removeAttribute("data-sale");
     ui.slide.hidden = false;
     await new Promise((r) => requestAnimationFrame(r));
