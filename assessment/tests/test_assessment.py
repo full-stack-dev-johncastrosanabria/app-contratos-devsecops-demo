@@ -518,12 +518,18 @@ class DevSecOpsRegression(unittest.TestCase):
             fake_repo = base / "repo"
             (fake_repo / "v1" / "src" / "Contratos").mkdir(parents=True)
             (fake_repo / "v1" / "src" / "Contratos" / "datos.json").write_text("{}", encoding="utf-8")
-            reset_res = execute_demo_reset(fake_repo, runs_dir, reset_runs=True, reset_sandbox=True, reset_boards=False)
-            self.assertEqual(reset_res["corridas"]["archivadas"], 2)
-            self.assertIn("v1/src/Contratos/datos.json", reset_res["sandbox_archivos_limpiados"])
-            self.assertEqual(build_powerbi_metrics(runs_dir)["kpis"]["corridas_totales"], 0)
+            # La sincronización de arriba dejó _estado_powerbi.json: sin red, restaurar no debe tocar el Power BI real.
+            with (patch("urllib.request.urlopen") as red_real,
+                  patch("assessment.powerbi_cloud.sync_powerbi_cloud", return_value={"sincronizado": True}) as pbi_sync):
+                reset_res = execute_demo_reset(fake_repo, runs_dir, reset_runs=True, reset_sandbox=True, reset_boards=False)
+                self.assertEqual(reset_res["corridas"]["archivadas"], 2)
+                self.assertIn("v1/src/Contratos/datos.json", reset_res["sandbox_archivos_limpiados"])
+                self.assertEqual(build_powerbi_metrics(runs_dir)["kpis"]["corridas_totales"], 0)
 
-            restored_res = restore_latest_archive(runs_dir)
+                restored_res = restore_latest_archive(runs_dir)
+            red_real.assert_not_called()
+            pbi_sync.assert_called_once_with(runs_dir, ensure_report=False)
+            self.assertEqual(restored_res["powerbi"], {"sincronizado": True})
             self.assertEqual(restored_res["corridas_restauradas"], 2)
             self.assertEqual(build_powerbi_metrics(runs_dir)["kpis"]["corridas_totales"], 2)
 
