@@ -1,9 +1,12 @@
 """Pruebas del director de la demo en un Chrome headless real (sin servidor de la consola)."""
+import html
 import json
 from pathlib import Path
+import struct
 import tempfile
 import unittest
 from unittest import mock
+import urllib.parse
 
 DEMO = Path(__file__).resolve().parents[2] / "demo"
 PAGINA = "<!doctype html><html lang='es'><body style='margin:0'><input id='campo'><div id='objetivo' style='width:240px;height:80px;margin:300px'>objetivo</div></body></html>"
@@ -17,6 +20,24 @@ CAJAS_JS = """() => {
     return {img: caja(raiz.querySelector('.s-captura img')), b: caja(raiz.querySelector('.caja[data-caja="b"]')),
             n: raiz.querySelectorAll('.s-captura .caja[data-caja]').length};
 }"""
+MEDIR_JS = """() => {
+    const raiz = document.querySelector('#demo-director').shadowRoot;
+    const caja = (el) => { const b = el.getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; };
+    return {hueco: caja(raiz.querySelector('.foco')),
+            cajas: Object.fromEntries([...raiz.querySelectorAll('.s-captura .caja')].map((el) => [el.dataset.caja, caja(el)]))};
+}"""
+
+
+def pagina_actions(jobs, banner=False) -> str:
+    """Corrida falsa con la lista lateral de la real (nav «Workflow run», un enlace por job) como data: URL."""
+    enlaces = "".join(
+        f'<a href="/o/r/actions/runs/7/job/{i}" style="position:absolute;left:32px;top:{370 + 32 * i}px;display:block;'
+        f'width:272px;height:32px;overflow:hidden;white-space:nowrap">{html.escape(job)}</a>'
+        for i, job in enumerate(jobs))
+    tapa = '<div style="position:fixed;left:0;top:300px;width:400px;height:500px;background:#fff"></div>' if banner else ""
+    return "data:text/html;charset=utf-8," + urllib.parse.quote(
+        f'<!doctype html><body style="margin:0"><nav aria-label="Workflow run">{enlaces}</nav>{tapa}</body>')
+
 
 try:
     from playwright.sync_api import sync_playwright
@@ -274,6 +295,57 @@ class DirectorEnPagina(unittest.TestCase):
         self.assertGreater(d["zVelo"], d["zSlide"], "el velo debe quedar sobre la slide")
         for real, esperado in zip(d["hueco"], (bx, by, bw, bh)):
             self.assertAlmostEqual(real, esperado, delta=2)
+
+
+    def test_captura_de_actions_devuelve_una_caja_por_job(self):
+        from demo import actions
+        with tempfile.TemporaryDirectory() as tmp:
+            captura = actions.capturar({"id": 7, "url": pagina_actions(actions.JOBS)}, Path(tmp), self.pw)
+            png = captura["imagen"].read_bytes()
+        self.assertEqual(list(captura["cajas"]), list(actions.JOBS))
+        self.assertEqual(captura["cajas"]["Evidencia xUnit (v2)"], [32, 402, 272, 32])
+        self.assertEqual(captura["imagen"].name, "actions-7.png")
+        self.assertEqual((captura["ancho"], captura["alto"]), (1600, 1000))
+        self.assertEqual(struct.unpack(">II", png[16:24]), (3200, 2000), "device scale 2")
+
+    def test_captura_de_actions_aborta_si_falta_o_se_tapa_un_job(self):
+        from demo import actions
+        sin_trivy = [j for j in actions.JOBS if "Trivy" not in j]
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(RuntimeError, r"Escaneo IaC, contenedor y SCA \(Trivy\)"):
+                actions.capturar({"id": 7, "url": pagina_actions(sin_trivy)}, Path(tmp), self.pw)
+            with self.assertRaisesRegex(RuntimeError, r"Evidencia xUnit \(v1\)"):
+                actions.capturar({"id": 7, "url": pagina_actions(actions.JOBS, banner=True)}, Path(tmp), self.pw)
+            self.assertEqual(list(Path(tmp).iterdir()), [], "sin todos los jobs no se guarda la captura")
+
+    def test_slide_de_captura_recorre_los_jobs_con_el_foco(self):
+        from demo.__main__ import Corrida
+        page = self.abrir()
+        textos = ["Primero las pruebas.", "Luego la imagen.", "Uno más."]
+        corrida = Corrida({"escenas": []}, {t: {"archivo": None, "duracion": 0.2} for t in textos}, sin_voz=True, ensayo=True)
+        corrida.page, corrida.k, corrida.planos = page, 0, [{}, {}]  # no es la última slide: al terminar se oculta
+        corrida.actions = {"src": CAPTURA, "ancho": 1600, "alto": 1000, "titulo": "Corrida verde en main",
+                           "cajas": {"v1": [32, 370, 272, 32], "v2": [32, 402, 272, 32], "oci": [32, 562, 272, 32]}}
+        vistos, decir = [], corrida.decir
+
+        def decir_y_medir(texto, fila):  # el hueco del velo y las cajas mientras suena cada frase
+            page.wait_for_timeout(700)
+            vistos.append(page.evaluate(MEDIR_JS))
+            decir(texto, fila)
+        corrida.decir = decir_y_medir
+        corrida._slide({"tipo": "slide", "plantilla": "captura", "voz": textos[:2], "focos": [["v1", "v2"], "oci"]},
+                       {"narracion_s": 0.0})
+        self.assertEqual(corrida.fallos, [])
+        (h1, c1), (h2, c2) = [(v["hueco"], v["cajas"]) for v in vistos]
+        union = [c1["v1"][0], c1["v1"][1], c1["v1"][2], c1["v2"][1] + c1["v2"][3] - c1["v1"][1]]
+        for real, esperado in [*zip(h1, union), *zip(h2, c2["oci"])]:
+            self.assertAlmostEqual(real, esperado, delta=2)
+        self.assertTrue(page.evaluate("""() => { const r = document.querySelector('#demo-director').shadowRoot;
+            return r.querySelector('.slide').hidden && !r.querySelector('.velo-foco').hasAttribute('data-visible'); }"""))
+        corrida.decir = decir
+        corrida._slide({"tipo": "slide", "plantilla": "captura", "voz": textos[2:], "focos": ["no-existe"]}, {"narracion_s": 0.0})
+        self.assertEqual(len(corrida.fallos), 1)
+        self.assertIn("no-existe", corrida.fallos[0])
 
 
 if __name__ == "__main__":

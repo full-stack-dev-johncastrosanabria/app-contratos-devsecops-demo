@@ -277,5 +277,64 @@ class DocumentoMarkdown(unittest.TestCase):
                                "<ul><li>TRX <code>Cancelado</code> · <code>Failed</code></li></ul></li><li>Fin</li></ul>")
 
 
+
+class ActionsPrevio(unittest.TestCase):
+    def test_corrida_verde_elige_la_de_main(self):
+        from demo import actions
+        pedidas = []
+
+        def github(metodo, url, cabeceras, cuerpo=None, timeout=15):
+            pedidas.append((metodo, url))
+            return {"workflow_runs": [{"id": 7, "html_url": "https://github.com/o/r/actions/runs/7",
+                                       "head_sha": "a" * 40, "updated_at": "2026-11-27T17:53:45Z"}]}
+        with mock.patch.object(actions, "load_settings", return_value={}), \
+                mock.patch.object(actions, "_gh_token", return_value=None), mock.patch.object(actions, "_http_json", github):
+            corrida = actions.corrida_verde("o/r")
+        self.assertEqual(corrida, {"id": 7, "url": "https://github.com/o/r/actions/runs/7", "sha": "a" * 40,
+                                   "fecha": "2026-11-27T17:53:45Z"})
+        self.assertEqual(pedidas, [("GET", "https://api.github.com/repos/o/r/actions/workflows/devsecops.yml/runs"
+                                           "?branch=main&status=success&per_page=1")])
+        with mock.patch.object(actions, "load_settings", return_value={}), \
+                mock.patch.object(actions, "_gh_token", return_value=None), \
+                mock.patch.object(actions, "_http_json", return_value={"workflow_runs": []}), \
+                self.assertRaisesRegex(RuntimeError, "verde"):
+            actions.corrida_verde("o/r")
+
+    def test_repo_origen_acepta_https_y_ssh(self):
+        from demo import actions
+        remoto = lambda url: mock.patch.object(actions.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout=url))
+        for url in ("https://github.com/o/r.git\n", "git@github.com:o/r.git\n", "https://github.com/o/r\n"):
+            with remoto(url):
+                self.assertEqual(actions.repo_origen(), "o/r")
+        with remoto("https://dev.azure.com/o/p/_git/r\n"), self.assertRaises(RuntimeError):
+            actions.repo_origen()
+
+    def test_revision_previa_detecta_puerto_5080_ocupado(self):
+        import socket
+        from demo import __main__ as runner
+        with socket.socket() as escucha:
+            escucha.bind(("127.0.0.1", 0))
+            escucha.listen()
+            puerto = escucha.getsockname()[1]
+            self.assertFalse(runner.puerto_libre(puerto))
+        self.assertTrue(runner.puerto_libre(puerto))
+        with mock.patch.object(runner, "rutas_sucias", return_value=[]), mock.patch.object(runner, "_ok"), \
+                mock.patch.object(runner, "puerto_libre", return_value=False) as libre, \
+                self.assertRaisesRegex(runner.Abortar, ":5080"):
+            runner.revision_previa("solo-evidencia")
+        libre.assert_called_once_with(5080)
+
+    def test_focos_van_en_la_captura_con_una_entrada_por_frase(self):
+        def errores(paso):
+            g = deepcopy(MINIMO)
+            g["escenas"][0]["pasos"] = [paso]
+            return guion.validar(g)
+        captura = {"tipo": "slide", "plantilla": "captura", "voz": ["Uno.", "Dos."]}
+        self.assertEqual(errores({**captura, "focos": [["v1", "v2"], None]}), [])
+        mal = ["a · paso 1: «focos» va en la slide «captura», con una entrada por frase de «voz»."]
+        self.assertEqual(errores({**captura, "focos": ["v1"]}), mal)
+        self.assertEqual(errores({"tipo": "narrar", "voz": "Hola.", "focos": ["v1"]}), mal)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -49,6 +49,10 @@ def validar(guion: dict) -> list[str]:
                 errores.append(f"{donde}: «motor» debe ser agente o solo-evidencia.")
             if paso.get("opcional") and tipo != "narrar":
                 errores.append(f"{donde}: «opcional» solo vale en «narrar».")
+            focos = paso.get("focos")
+            if focos is not None and (tipo != "slide" or paso.get("plantilla") != "captura"
+                                      or len(lista(focos)) != len(lista(paso.get("voz")))):
+                errores.append(f"{donde}: «focos» va en la slide «captura», con una entrada por frase de «voz».")
             espera = paso.get("espera_s")
             if tipo in ESPERAS and espera and not (isinstance(espera, list) and len(espera) == 2 and espera[0] <= espera[1]):
                 errores.append(f"{donde}: «espera_s» debe ser [min, max].")

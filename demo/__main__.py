@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -22,12 +23,13 @@ import urllib.request
 from dotenv import dotenv_values
 from playwright.sync_api import Error as ErrorPlaywright, TimeoutError as TiempoAgotado, sync_playwright
 
-from . import guion, powerbi, voz
+from . import actions, guion, powerbi, voz
 
 DEMO = Path(__file__).resolve().parent
 REPO = DEMO.parent
 RUNS = REPO / "assessment/runs"  # = assessment.ui.OUTPUT; importar ui tarda 5 s
 CONSOLA = "http://127.0.0.1:8050"
+PUERTO_SANDBOX = 5080  # = assessment.ui.SANDBOX_PORT
 CABECERAS = {"Host": "127.0.0.1:8050", "Origin": CONSOLA, "Content-Type": "application/json"}
 REINICIO_COMPLETO = {"corridas": True, "sandbox": True, "boards": True, "codigo": True, "prs": True}
 RUTAS_DEMO = ("v1", "v2", "v3", "Dockerfile", "deploy", ".github")
@@ -101,6 +103,11 @@ def _responde(url: str, timeout: float = 3) -> bool:
             return True
     except OSError:
         return False
+
+
+def puerto_libre(puerto: int) -> bool:
+    with socket.socket() as s:
+        return s.connect_ex(("127.0.0.1", puerto)) != 0
 
 
 def asegurar_consola() -> subprocess.Popen | None:
@@ -186,8 +193,23 @@ def revision_previa(motor: str) -> None:
     if sucias:
         raise Abortar("el reinicio no dejó limpias las rutas de la demo:\n" + "\n".join(f"      {l}" for l in sucias))
     _ok("Git limpio en " + " ".join(RUTAS_DEMO))
+    if not puerto_libre(PUERTO_SANDBOX):
+        raise Abortar(f"algo sigue escuchando en :{PUERTO_SANDBOX} tras el reinicio; ciérralo (lsof -i :{PUERTO_SANDBOX})"
+                      " y vuelve a lanzar la demo.")
 
-    from assessment.demo_reset import wiql_tareas_demo
+    from assessment.demo_reset import clean_sandbox_data, wiql_tareas_demo
+    for version in ("v1", "v2", "v3"):  # ya compiladas, cada arranque del sandbox tarda segundos
+        try:
+            hecho = subprocess.run(["dotnet", "build", str(REPO / version / "src" / "Contratos"), "-nologo", "-v", "q"],
+                                   capture_output=True, timeout=600)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise Abortar(f"no se pudo compilar {version} ({type(exc).__name__})") from None
+        if hecho.returncode:
+            raise Abortar(f"{version} no compila; revisa «dotnet build {version}/src/Contratos»")
+    _ok(f"v1–v3 compiladas para el sandbox :{PUERTO_SANDBOX}")
+    borrados = clean_sandbox_data(REPO)
+    _ok("Sandbox sin datos" + (f" (borrados: {', '.join(borrados)})" if borrados else ""))
+
     from assessment.integrations import (ADO_RESOURCE, ARM_RESOURCE, _ado_headers, _az_token, _http_json,
                                          fetch_azure_runtime, load_settings)
     if not (_az_token(ADO_RESOURCE) and _az_token(ARM_RESOURCE)):
@@ -251,6 +273,19 @@ def preparar_powerbi() -> str:
         raise Abortar(f"{problema}. Inicia sesión una vez con «python -m demo --iniciar-sesion» y vuelve a lanzar la demo.")
     _ok("Sesión de Power BI vigente en el perfil de la demo")
     return inquilino
+
+
+def preparar_actions() -> dict:
+    """Captura la corrida verde más reciente del pipeline en main; sin ella la escena de CI/CD no tiene qué mostrar."""
+    try:
+        corrida = actions.corrida_verde(actions.repo_origen())
+        with sync_playwright() as pw:
+            captura = actions.capturar(corrida, REGISTROS, pw)
+    except (RuntimeError, OSError, ValueError, KeyError, subprocess.SubprocessError, ErrorPlaywright) as exc:
+        raise Abortar(f"no se pudo capturar la corrida de GitHub Actions ({exc})")
+    _ok(f"GitHub Actions capturado: corrida verde de main en {corrida['sha'][:7]}, con sus {len(captura['cajas'])} jobs")
+    return {"src": f"/__demo/captura/{captura['imagen'].name}", "ancho": captura["ancho"], "alto": captura["alto"],
+            "cajas": captura["cajas"], "titulo": f"Corrida verde de main · commit {corrida['sha'][:7]}"}
 
 
 def preparar_voz(g: dict, sin_voz: bool) -> dict:
@@ -323,6 +358,29 @@ def servir_voz(route) -> None:
         route.fulfill(status=404, body="")
 
 
+def servir_captura(route) -> None:
+    nombre = urllib.parse.urlparse(route.request.url).path.rsplit("/", 1)[-1]
+    archivo = REGISTROS / nombre
+    if re.fullmatch(r"actions-\d+\.png", nombre) and archivo.is_file():
+        route.fulfill(path=archivo)
+    else:
+        route.fulfill(status=404, body="")
+
+
+# Unión de las cajas nombradas de la slide, medida cuando la captura ya terminó de entrar.
+UNION_CAJAS_JS = """async (nombres) => {
+    const raiz = document.querySelector('#demo-director').shadowRoot;
+    const lienzo = raiz.querySelector('.s-captura .lienzo');
+    if (lienzo) await Promise.all(lienzo.getAnimations().filter((a) => a.effect.getTiming().iterations !== Infinity).map((a) => a.finished));
+    const cajas = [...raiz.querySelectorAll('.s-captura .caja')];
+    const els = nombres.map((n) => cajas.find((el) => el.dataset.caja === n));
+    if (els.some((el) => !el)) return null;
+    const r = els.map((el) => el.getBoundingClientRect());
+    const x = Math.min(...r.map((b) => b.left)), y = Math.min(...r.map((b) => b.top));
+    return {x, y, width: Math.max(...r.map((b) => b.right)) - x, height: Math.max(...r.map((b) => b.bottom)) - y};
+}"""
+
+
 class Corrida:
     """Recorre el guion en la página y lleva el registro de tiempos por escena."""
 
@@ -343,6 +401,7 @@ class Corrida:
         self.donde = ""
         self.ultimo_clic = time.monotonic()
         self.inquilino: str | None = None  # tenant de Entra para insertar el reporte de Power BI
+        self.actions: dict = {}  # captura de GitHub Actions de la revisión previa: src, ancho, alto, cajas y titulo
 
     def previsto(self) -> dict[str, float]:
         """Total estimado por velocidad: las opcionales suenan mientras el total no pase de LIMITE_S."""
@@ -445,10 +504,18 @@ class Corrida:
     # --- un ejecutor por tipo de paso ---
 
     def _slide(self, paso: dict, fila: dict) -> None:
-        datos = {c: v for c, v in paso.items() if c not in ("tipo", "plantilla", "voz", "motor")}
+        datos = {c: v for c, v in paso.items() if c not in ("tipo", "plantilla", "voz", "motor", "focos")}
+        if paso["plantilla"] == "captura":
+            datos = {**self.actions, **datos}
         self.js("() => __director.foco(null)")
         self.js("([p, d]) => __director.slide(p, d)", [paso["plantilla"], datos])
-        self.decir(paso["voz"], fila)
+        focos = paso.get("focos") or []
+        for i, texto in enumerate(guion.lista(paso["voz"])):  # cada frase con su foco, si lo tiene
+            if i < len(focos):
+                self.enfocar_cajas(focos[i])
+            self.decir(texto, fila)
+        if focos:
+            self.js("() => __director.foco(null)")
         if self.k < len(self.planos) - 1:  # la última slide queda en pantalla para las preguntas
             self.js("() => __director.ocultarSlide()")
 
@@ -471,6 +538,15 @@ class Corrida:
         self.decir(paso["voz"], fila)
         if lupa:
             self.js("() => __director.lupa(null)")
+
+    def enfocar_cajas(self, nombres) -> None:
+        """Enfoca la unión de las cajas nombradas de la slide (jobs de la captura); sin nombres apaga el foco."""
+        nombres = guion.lista(nombres)
+        caja = self.js(UNION_CAJAS_JS, nombres) if nombres else None
+        if caja or not nombres:
+            self.js("(c) => __director.foco(c)", caja)
+        else:
+            self.fallo("la slide no tiene la caja «" + "», «".join(nombres) + "»")
 
     def lupa(self, selector: str, opciones: dict) -> bool:
         loc, caja = self.objetivo(selector)
@@ -574,6 +650,7 @@ def presentar(corrida: Corrida, velocidad: float, paso_a_paso: bool, ventana: bo
         contexto = powerbi.abrir_perfil(pw, argumentos)  # persistente: conserva la sesión de Power BI
         try:
             contexto.route("**/__demo/voz/*", servir_voz)
+            contexto.route("**/__demo/captura/*", servir_captura)
             contexto.add_init_script(ATAJOS_APAGADOS)
             contexto.add_init_script(SIN_VENTANA_POWERBI)
             contexto.add_init_script(f"window.__DIRECTOR_CSS = {json.dumps(css)};")
@@ -709,6 +786,7 @@ def main(argv: list[str] | None = None) -> int:
         _ok("Reinicio previo · " + resumen_reinicio(reiniciar_por_http()))
         revision_previa(args.motor)
         inquilino = preparar_powerbi()
+        captura_actions = preparar_actions()
         clips = preparar_voz(g, args.sin_voz)
         if not args.sin_grabar:
             if puede_grabar():
@@ -718,7 +796,7 @@ def main(argv: list[str] | None = None) -> int:
                 _aviso("Sin permiso de Grabación de pantalla para esta terminal: la demo no se grabará "
                        "(Ajustes del Sistema → Privacidad y seguridad → Grabación de pantalla y audio del sistema)")
         corrida = Corrida(g, clips, args.sin_voz or args.ensayo, args.ensayo)
-        corrida.inquilino = inquilino
+        corrida.inquilino, corrida.actions = inquilino, captura_actions
         print("Presentando · Espacio pausa · → siguiente · < > velocidad · P paso a paso · Q Q terminar", flush=True)
         presentar(corrida, VELOCIDAD_ENSAYO if args.ensayo else args.velocidad, args.paso_a_paso, args.ventana, grabacion)
         if args.ensayo:
