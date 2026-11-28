@@ -47,7 +47,6 @@ OCULTAR_DIRECTOR = "#demo-director{visibility:hidden!important}"
 VELOCIDAD_ENSAYO = 6  # fuera del menú: la primera tecla de velocidad vuelve a 0,75/1/1,25
 ESPERA_ELEMENTO_MS = 10_000
 MAX_REINTENTOS = 3
-TOPE_GRABACION_S = 2700  # si el runner muere sin detenerla, screencapture para sola a los 45 min
 
 
 class Abortar(Exception):
@@ -343,8 +342,10 @@ def puede_grabar() -> bool:
 def grabar(destino: Path) -> subprocess.Popen | None:
     try:
         # Sesión propia: el Ctrl+C de la terminal no le llega; la detiene el runner con un único SIGINT.
-        proceso = subprocess.Popen(["screencapture", "-v", "-A", f"-V{TOPE_GRABACION_S}", str(destino)],
-                                   stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        # Sin -V: con tope de tiempo, screencapture muere con SIGINT sin guardar el .mov.
+        # shortcut: sin tope, un runner muerto con kill -9 la deja grabando (pkill screencapture); poner un guardián si pasa.
+        proceso = subprocess.Popen(["screencapture", "-v", "-A", str(destino)],
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                    start_new_session=True)
     except OSError:
         _aviso("No se pudo iniciar la grabación")
@@ -363,6 +364,8 @@ def detener_grabacion(proceso: subprocess.Popen) -> None:
         proceso.wait(timeout=30)
     except subprocess.TimeoutExpired:
         proceso.kill()
+    if not Path(proceso.args[-1]).is_file():  # el .mov es el último argumento
+        _aviso("La grabación no se guardó: screencapture no dejó el .mov")
 
 
 # ---------- Presentación ----------
@@ -829,6 +832,12 @@ def _como_ctrl_c(_signum, _frame):
     raise KeyboardInterrupt
 
 
+def atrapar_cortes() -> None:
+    """kill (SIGTERM) y cerrar la terminal (SIGHUP) cortan como Ctrl+C: el finally detiene la grabación antes que nada."""
+    for corte in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(corte, _como_ctrl_c)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _argumentos(argv)
     if args.iniciar_sesion:
@@ -848,7 +857,7 @@ def main(argv: list[str] | None = None) -> int:
     g = guion.filtrar(g, args.motor)
     sello = datetime.now().strftime("%Y%m%d-%H%M%S")
     grabacion = None
-    signal.signal(signal.SIGTERM, _como_ctrl_c)
+    atrapar_cortes()
     consola, tocado, corrida, codigo = None, False, None, 1
     print("Demo REN-001 · revisión previa", flush=True)
     try:

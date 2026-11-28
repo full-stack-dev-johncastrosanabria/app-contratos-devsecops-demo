@@ -289,6 +289,55 @@ class RunnerPrevio(unittest.TestCase):
             self.assertFalse(trivy_vigente(meta, ahora))
 
 
+class _Screencapture:
+    """screencapture -v medido en macOS 27.3: con -V (tope de tiempo), SIGINT la mata sin guardar; sin -V, SIGINT cierra el .mov."""
+
+    def __init__(self, args, **_):
+        self.args, self.returncode = args, None
+
+    def poll(self):
+        return self.returncode
+
+    def send_signal(self, _senal):
+        if any(a.startswith("-V") for a in self.args):
+            self.returncode = -2
+        else:
+            Path(self.args[-1]).write_bytes(b"moov")
+            self.returncode = 0
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+    def kill(self):
+        self.returncode = -9
+
+
+class Grabacion(unittest.TestCase):
+    def test_detener_la_grabacion_guarda_el_mov(self):
+        from demo import __main__ as runner
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(runner.subprocess, "Popen", _Screencapture), \
+                mock.patch.object(runner.time, "sleep"):
+            destino = Path(tmp) / "demo.mov"
+            runner.detener_grabacion(runner.grabar(destino))
+            self.assertTrue(destino.is_file())
+
+    def test_avisa_si_screencapture_no_guardo_la_grabacion(self):
+        from demo import __main__ as runner
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(runner, "_aviso") as aviso:
+            runner.detener_grabacion(_Screencapture(["screencapture", "-v", "-V60", str(Path(tmp) / "demo.mov")]))
+        aviso.assert_called_once()
+        self.assertIn("grabación", aviso.call_args.args[0])
+
+    def test_cerrar_la_terminal_corta_como_ctrl_c(self):
+        import signal
+        from demo.__main__ import atrapar_cortes
+        previos = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGHUP)}
+        self.addCleanup(lambda: [signal.signal(s, h) for s, h in previos.items()])
+        atrapar_cortes()
+        for corte in (signal.SIGTERM, signal.SIGHUP):  # se llama al manejador: un SIGHUP real mataría la suite si faltara
+            with self.subTest(corte=corte.name), self.assertRaises(KeyboardInterrupt):
+                signal.getsignal(corte)(corte, None)
+
 
 class DocumentoMarkdown(unittest.TestCase):
     def test_tabla_markdown_a_html(self):
