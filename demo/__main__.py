@@ -815,7 +815,7 @@ def _argumentos(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--ventana", action="store_true", help="ventana de 1440×900 en vez de pantalla completa")
     p.add_argument("--guion", type=Path, default=DEMO / "guion.yaml")
     p.add_argument("--iniciar-sesion", action="store_true",
-                   help="abre Power BI en el perfil de la demo para iniciar sesión una vez (con MFA) y sale")
+                   help="abre el reporte de Power BI insertado como en la demo para iniciar sesión una vez (con MFA), lo comprueba y sale")
     return p.parse_args(argv)
 
 
@@ -826,8 +826,12 @@ def _como_ctrl_c(_signum, _frame):
 def main(argv: list[str] | None = None) -> int:
     args = _argumentos(argv)
     if args.iniciar_sesion:
-        powerbi.iniciar_sesion()
-        return 0
+        try:
+            problema = powerbi.iniciar_sesion(CONSOLA)
+        except (RuntimeError, OSError, KeyError, ValueError) as exc:
+            problema = f"no se pudo abrir el reporte insertado ({type(exc).__name__}: {exc})"
+        print(f"✗ {problema}" if problema else "✓ El reporte insertado se dibuja con la sesión del perfil: la demo ya puede mostrarlo.")
+        return 1 if problema else 0
     if args.ensayo:
         args.motor, args.sin_grabar = "solo-evidencia", True  # la voz se genera (salvo --sin-voz) pero no suena
     g = guion.cargar(args.guion)

@@ -185,6 +185,29 @@ class PowerBIDemo(unittest.TestCase):
             self.assertIsNone(powerbi.reponer(Path(tmp) / "no-existe.json"))
         api.assert_not_called()
 
+    def test_iniciar_sesion_abre_el_reporte_insertado_como_la_demo(self):
+        # La demo ve la sesión del iframe sobre la consola (almacenamiento particionado por sitio): iniciar
+        # sesión en el reporte suelto no le sirve. Al cerrar la ventana se comprueba como en la revisión previa.
+        import html
+        visitas, cuerpos = [], []
+        pagina = mock.MagicMock()
+        pagina.goto.side_effect = visitas.append
+        pagina.route.side_effect = lambda url, manejar: manejar(mock.MagicMock(fulfill=lambda **k: cuerpos.append(k["body"])))
+        insertada = powerbi.url_embebida("rep-1", "t-123")
+        with (tempfile.TemporaryDirectory() as tmp,
+              mock.patch.object(powerbi, "ESTADO", Path(tmp) / "estado.json"),
+              mock.patch.object(powerbi, "abrir_perfil", return_value=mock.MagicMock(pages=[pagina])),
+              mock.patch.object(powerbi, "token", return_value="tok"),
+              mock.patch.object(powerbi, "inquilino", return_value="t-123"),
+              mock.patch.object(powerbi, "problema_sesion", return_value="sigue sin dibujarse") as comprobar,
+              mock.patch("playwright.sync_api.sync_playwright"), mock.patch("builtins.print")):
+            powerbi.ESTADO.write_text(json.dumps({"report_id": "rep-1"}), encoding="utf-8")
+            problema = powerbi.iniciar_sesion("http://127.0.0.1:8050")
+        self.assertEqual(visitas, ["http://127.0.0.1:8050/__demo/prueba-powerbi"])
+        self.assertIn(html.escape(insertada), cuerpos[0])
+        comprobar.assert_called_once_with(insertada, "http://127.0.0.1:8050")
+        self.assertEqual(problema, "sigue sin dibujarse")
+
     def test_url_del_reporte_insertado(self):
         import base64
         from urllib.parse import parse_qs, urlparse

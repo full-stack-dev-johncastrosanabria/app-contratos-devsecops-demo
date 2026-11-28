@@ -185,12 +185,16 @@ escenas:
           - >-
             Y así se ve el CI/CD de este repositorio en GitHub Actions: la corrida verde más reciente en main.
             Primero, las pruebas xUnit de cada entrega, con su reporte de pruebas como artefacto.
+          # Spec: no se narra que «debería salir en rojo»; solo por qué sale en verde (assessment/ci.py).
+          - "Cada job comprueba que su entrega deje la evidencia de su escenario: en la versión 2, que la prueba de REN-001 falle. Por eso sale en verde."
           - En paralelo, CodeQL analiza el código C# y Python.
           - Trivy revisa el repositorio, el Dockerfile y los manifiestos en busca de dependencias vulnerables, secretos y malas configuraciones.
-          - Con las pruebas en orden, se construye la imagen del contenedor y se publica en GitHub Container Registry. Este pipeline no despliega.
+          # El paso OCI solo acepta v1 o v3 (devsecops.yml): la imagen de v2 nunca se publica.
+          - Con las pruebas en orden, se construye la imagen del contenedor y se publica en GitHub Container Registry, nunca la de la versión 2. Este pipeline no despliega.
           - "Y fíjense en la versión 3: su job sale en verde, con todas sus pruebas pasando. Pero ninguna de ellas demuestra REN-001."
         focos:
           - ["Evidencia xUnit (v1)", "Evidencia xUnit (v2)", "Evidencia xUnit (v3)"]
+          - ["Evidencia xUnit (v2)"]
           - ["Seguridad en origen (CodeQL) (csharp, autobuild)", "Seguridad en origen (CodeQL) (python, none)"]
           - ["Escaneo IaC, contenedor y SCA (Trivy)"]
           - ["Construir imagen OCI (GHCR)"]
@@ -199,7 +203,7 @@ escenas:
         foco: "#ledger"
         etiqueta: Matriz de evaluación
         voz: "Volvamos a la consola: la matriz se llena en vivo."
-      # espera_s es lo que queda de los 150–210 s de la corrida tras el grafo y Actions (46 s a 1,25×, 78 s a 0,75×).
+      # espera_s es lo que queda de los 150–210 s de la corrida tras el grafo y Actions (54 s a 1,25×, 91 s a 0,75×).
       - tipo: esperar
         motor: agente
         condicion: &dictamenes >-
@@ -208,7 +212,7 @@ escenas:
             ['pass', 'fail', 'unknown'].includes(document.querySelector(`#ledger-head th.ledger-ver[data-ver="${v}"]`)?.dataset.verdict) &&
             document.querySelector(`#card-${v} .provenance-chip`)?.dataset.live === 'true')
         max_s: 420
-        espera_s: [104, 132]
+        espera_s: [96, 119]
         en_vivo: los agentes evalúan las tres entregas
         # La tarjeta con error solo se ve con su pestaña activa: primero la pestaña, luego «Reintentar vN con Solo evidencia».
         si_error: &reintento >-
