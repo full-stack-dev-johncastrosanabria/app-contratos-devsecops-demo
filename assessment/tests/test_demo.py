@@ -682,6 +682,30 @@ class PasoApp(unittest.TestCase):
         self.assertFalse([c for c in ok.call_args_list if "Boards" in c.args[0]], "Boards sin retirar bajo un ✓")
         self.assertTrue([c for c in aviso.call_args_list if "Boards" in c.args[0]], aviso.call_args_list)
 
+    def test_limpiar_sigue_aunque_la_terminal_ya_no_acepte_escrituras(self):
+        # Una escritura puede chocar con la terminal colgada antes de que llegue el SIGHUP: el primer print de limpiar()
+        # daba EIO y la restauración entera se cortaba.
+        import errno
+        from demo import __main__ as runner
+        escritas = []
+
+        def imprimir(*args, **kwargs):
+            escritas.append(args)
+            if len(escritas) == 1:
+                raise OSError(errno.EIO, "Input/output error")
+        with mock.patch.object(runner, "_consola", return_value={}), \
+                mock.patch("assessment.demo_reset.clean_sandbox_data", return_value=[]), \
+                mock.patch.object(runner, "reiniciar_por_http", return_value={}) as reinicio, \
+                mock.patch.object(runner.powerbi, "reponer", return_value=None) as reponer, \
+                mock.patch.object(runner, "rutas_sucias", return_value=[]), \
+                mock.patch.object(runner, "puerto_libre", return_value=True), \
+                mock.patch.object(runner, "_sin_terminal") as sin_terminal, \
+                mock.patch("builtins.print", side_effect=imprimir):
+            runner.limpiar(None, True)
+        sin_terminal.assert_called_once()
+        reinicio.assert_called_once()
+        reponer.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

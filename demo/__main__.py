@@ -68,12 +68,21 @@ class Terminar(Exception):
     """El presentador pulsó Terminar (Q dos veces)."""
 
 
+def _decir(texto: str) -> None:
+    """print que no deja la restauración a medias: si la terminal ya se cerró (EIO), sigue en salida.log."""
+    try:
+        print(texto, flush=True)
+    except OSError:
+        _sin_terminal()
+        print(texto, flush=True)
+
+
 def _ok(texto: str) -> None:
-    print(f"  ✓ {texto}", flush=True)
+    _decir(f"  ✓ {texto}")
 
 
 def _aviso(texto: str) -> None:
-    print(f"  ! {texto}", flush=True)
+    _decir(f"  ! {texto}")
 
 
 def _ajuste(clave: str) -> str:
@@ -803,7 +812,7 @@ def presentar(corrida: Corrida, velocidad: float, paso_a_paso: bool, ventana: bo
 
 def limpiar(consola: subprocess.Popen | None, tocado: bool) -> None:
     if tocado:
-        print("\nRestaurando el entorno…", flush=True)
+        _decir("\nRestaurando el entorno…")
         try:  # primero el sandbox, mientras vive la consola que lo lanzó
             _consola("POST", "/api/sandbox", {"accion": "detener"})
         except (OSError, RuntimeError, ValueError) as exc:
@@ -843,7 +852,7 @@ def limpiar(consola: subprocess.Popen | None, tocado: bool) -> None:
     if not puerto_libre(PUERTO_SANDBOX):
         _aviso(f"Algo sigue escuchando en :{PUERTO_SANDBOX}; ciérralo antes de la próxima demo (lsof -i :{PUERTO_SANDBOX}).")
     elif reiniciado and not sucias:
-        print("Demo lista para volver a ejecutarse.", flush=True)
+        _decir("Demo lista para volver a ejecutarse.")
 
 
 def escribir_registro(corrida: Corrida, args, sello: str, grabacion: Path | None) -> Path:
@@ -1015,27 +1024,27 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Ensayo terminado: {len(corrida.fallos)} fallos de selectores o esperas.", flush=True)
         codigo = 1 if corrida.fallos and args.ensayo else 0
     except Abortar as exc:
-        print(f"\nRevisión previa detenida: {exc}", flush=True)
+        _decir(f"\nRevisión previa detenida: {exc}")
     except Terminar:
         codigo = 0
     except KeyboardInterrupt:
-        print("\nInterrumpida con Ctrl+C.", flush=True)
+        _decir("\nInterrumpida con Ctrl+C.")
         codigo = 130
     except ErrorPlaywright as exc:
         if "closed" not in str(exc):
             raise
-        print("\nLa ventana de la demo se cerró.", flush=True)
+        _decir("\nLa ventana de la demo se cerró.")
         codigo = 0
     finally:
         proteger_restauracion()
         limpiar(consola, tocado)
         if corrida and corrida.filas:
-            print(f"Registro de tiempos: {escribir_registro(corrida, args, sello, grabacion).relative_to(REPO)}", flush=True)
+            _decir(f"Registro de tiempos: {escribir_registro(corrida, args, sello, grabacion).relative_to(REPO)}")
         if grabacion and grabacion.is_file():
-            print(f"Grabación: {grabacion}", flush=True)
+            _decir(f"Grabación: {grabacion}")
         if corrida and corrida.capturas:
             try:
-                print(f"Capturas del recorrido: {armar_pdf(corrida.carpeta).relative_to(REPO)}", flush=True)
+                _decir(f"Capturas del recorrido: {armar_pdf(corrida.carpeta).relative_to(REPO)}")
             except ErrorPlaywright as exc:
                 _aviso(f"No se pudo armar el PDF ({exc}); las capturas quedan en {corrida.carpeta.relative_to(REPO)}")
     return codigo
