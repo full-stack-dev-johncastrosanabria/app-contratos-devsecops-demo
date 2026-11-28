@@ -19,10 +19,9 @@ RESPALDO = DEMO / ".registro" / "powerbi-previo.json"
 ESTADO = DEMO.parent / "assessment/runs/_estado_powerbi.json"
 TABLA = "Corridas"
 LOTE = 5000  # la Push API acepta hasta 10.000 filas por POST
-# Página local donde se inserta el reporte, en el sitio de la consola: la sesión del iframe se guarda
-# particionada por ese sitio, así que solo vale la que se inicia ahí (no la del reporte suelto).
-PRUEBA = "/__demo/prueba-powerbi"
-VISUAL = "visual-container, .visual-container"  # un visual ya dibujado dentro del reporte
+PRUEBA = "/__demo/prueba-powerbi"  # página local donde se inserta el reporte, sobre el sitio de la consola como en la demo
+# Un visual ya dibujado: <visual-container> queda inline y sin caja (Playwright nunca lo ve visible); su <visual-modern> sí.
+VISUAL = "visual-modern"
 
 
 def abrir_perfil(pw, argumentos: list[str], headless: bool = False):
@@ -36,8 +35,22 @@ def _insertado(url: str) -> str:
     return f'<!doctype html><iframe src="{html.escape(url)}" style="width:1280px;height:720px;border:0"></iframe>'
 
 
+def entrar(pagina, url: str, espera_ms: int = 45_000) -> bool:
+    """Abre el reporte como página en esta pestaña: Power BI entra con la cookie de Entra del perfil, sin clics.
+    La inserción segura guarda esa sesión por pestaña, así que el iframe solo la usa si va en la misma."""
+    # shortcut: el iframe comparte el almacenamiento de la pestaña porque Playwright lanza Chrome sin
+    # ThirdPartyStoragePartitioning; si eso cambia, el iframe pedirá iniciar sesión y la revisión previa lo detecta.
+    from playwright.sync_api import TimeoutError as TiempoAgotado
+    pagina.goto(url)
+    try:
+        pagina.locator(VISUAL).first.wait_for(timeout=espera_ms)
+        return True
+    except TiempoAgotado:
+        return False
+
+
 def iniciar_sesion(consola: str) -> str | None:
-    """Abre el reporte insertado como en la demo para que la persona inicie sesión una vez (con MFA).
+    """Abre el reporte como página en el perfil de la demo para que la persona inicie sesión una vez (con MFA).
     Al cerrar la ventana lo comprueba como la revisión previa: None si ya se dibuja; si no, qué falló."""
     from playwright.sync_api import Error as ErrorPlaywright, sync_playwright
     url = url_embebida(json.loads(ESTADO.read_text(encoding="utf-8"))["report_id"], inquilino(token()))
@@ -45,10 +58,9 @@ def iniciar_sesion(consola: str) -> str | None:
         contexto = abrir_perfil(pw, ["--window-size=1320,860"])
         try:
             pagina = contexto.pages[0] if contexto.pages else contexto.new_page()
-            pagina.route(consola + PRUEBA, lambda r: r.fulfill(content_type="text/html; charset=utf-8", body=_insertado(url)))
-            pagina.goto(consola + PRUEBA)
-            print("Pulsa «Iniciar sesión» dentro del reporte y completa el acceso; si te lo ofrece, mantén la sesión\n"
-                  "iniciada. Cuando veas el reporte, cierra la ventana.", flush=True)
+            pagina.goto(url)
+            print("Si Power BI te lo pide, inicia sesión y elige mantener la sesión iniciada.\n"
+                  "Cuando veas el reporte, cierra la ventana.", flush=True)
             pagina.wait_for_event("close", timeout=0)
         except ErrorPlaywright:
             pass  # cerró Chrome entero en vez de la ventana
@@ -61,8 +73,8 @@ def iniciar_sesion(consola: str) -> str | None:
 
 
 def problema_sesion(url: str, consola: str, espera_ms: int = 45_000) -> str | None:
-    """Inserta el reporte en una página local sin ventana, con el perfil de la demo: igual que en la demo
-    (iframe de terceros sobre la consola). None si se dibuja; si no, qué falló."""
+    """Como la demo, sin ventana y en una sola pestaña: abre el reporte como página y luego lo inserta sobre
+    la consola. None si se dibuja; si no, qué falló."""
     from playwright.sync_api import Error as ErrorPlaywright, TimeoutError as TiempoAgotado, sync_playwright
     prueba = consola + PRUEBA
     with sync_playwright() as pw:
@@ -72,12 +84,14 @@ def problema_sesion(url: str, consola: str, espera_ms: int = 45_000) -> str | No
             return f"no se pudo abrir el perfil de la demo (¿sigue abierta la ventana de inicio de sesión?): {str(exc).splitlines()[0]}"
         try:
             pagina = contexto.pages[0] if contexto.pages else contexto.new_page()
+            if not entrar(pagina, url, espera_ms):
+                return "Power BI no abrió el reporte con la sesión del perfil de la demo"
             pagina.route(prueba, lambda r: r.fulfill(content_type="text/html; charset=utf-8", body=_insertado(url)))
             pagina.goto(prueba)
             pagina.frame_locator("iframe").locator(VISUAL).first.wait_for(timeout=espera_ms)
             return None
         except TiempoAgotado:
-            return "el reporte insertado no se dibujó: el perfil de la demo no tiene sesión en el iframe de Power BI"
+            return "el reporte se abre como página, pero no se dibuja insertado sobre la consola"
         finally:
             contexto.close()
 

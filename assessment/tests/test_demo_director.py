@@ -190,9 +190,12 @@ class DirectorEnPagina(unittest.TestCase):
 
         def power_bi_falso(route):
             pedidas.append(route.request.url)
+            # Como el Power BI real: <visual-container> queda inline y sin caja; lo que se ve es su <visual-modern>.
             route.fulfill(content_type="text/html", body=(
-                "<!doctype html><body><script>setTimeout(() => { const v = document.createElement('visual-container');"
-                " v.style.cssText = 'display:block;width:200px;height:80px'; document.body.append(v); }, 300)</script></body>"))
+                "<!doctype html><body><script>setTimeout(() => { document.body.innerHTML = '<visual-container>"
+                "<div class=\"visual\" style=\"position:absolute;left:0;top:0;width:200px;height:80px\">"
+                "<visual-modern style=\"display:block;width:200px;height:80px\"></visual-modern></div></visual-container>'; }, 300)"
+                "</script></body>"))
         page.route("https://app.powerbi.com/**", power_bi_falso)
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(powerbi, "ESTADO", Path(tmp) / "estado.json"):
             powerbi.ESTADO.write_text(json.dumps({"report_id": "rep-1"}), encoding="utf-8")

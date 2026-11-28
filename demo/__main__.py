@@ -670,10 +670,12 @@ class Corrida:
         except TiempoAgotado:
             self.fallo(f"el portal {PORTAL} no cargó")
 
+    def url_reporte(self) -> str:
+        return powerbi.url_embebida(json.loads(powerbi.ESTADO.read_text(encoding="utf-8"))["report_id"], self.inquilino)
+
     def _reporte(self, paso: dict, fila: dict) -> None:
         """Power BI dentro de la demo: la slide inserta el reporte que la consola acaba de sincronizar."""
-        estado = json.loads(powerbi.ESTADO.read_text(encoding="utf-8"))
-        url = powerbi.url_embebida(estado["report_id"], self.inquilino)
+        url = self.url_reporte()
         self.js("() => __director.foco(null)")
         self.js("([u, t]) => __director.slide('reporte', {url: u, titulo: t})", [url, paso.get("titulo") or "Reporte de Power BI"])
         self.ultimo_clic = time.monotonic()  # max_s cuenta desde que se pide el reporte
@@ -707,6 +709,9 @@ def presentar(corrida: Corrida, velocidad: float, paso_a_paso: bool, ventana: bo
             contexto.add_init_script(director)
             contexto.expose_binding("__demoEvento", corrida.al_evento)
             corrida.page = contexto.pages[0] if contexto.pages else contexto.new_page()
+            # La sesión de Power BI vale por pestaña: el reporte se abre aquí antes que la consola que lo inserta.
+            if corrida.inquilino and not powerbi.entrar(corrida.page, corrida.url_reporte()):
+                _aviso("Power BI no abrió la sesión en la pestaña de la demo: el reporte pedirá iniciar sesión")
             # Como en un perfil nuevo: la consola arranca sin nada guardado de corridas anteriores.
             cdp = contexto.new_cdp_session(corrida.page)
             cdp.send("Storage.clearDataForOrigin", {"origin": CONSOLA, "storageTypes": "all"})
@@ -815,7 +820,7 @@ def _argumentos(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--ventana", action="store_true", help="ventana de 1440×900 en vez de pantalla completa")
     p.add_argument("--guion", type=Path, default=DEMO / "guion.yaml")
     p.add_argument("--iniciar-sesion", action="store_true",
-                   help="abre el reporte de Power BI insertado como en la demo para iniciar sesión una vez (con MFA), lo comprueba y sale")
+                   help="abre el reporte de Power BI en el perfil de la demo para iniciar sesión una vez (con MFA), lo comprueba y sale")
     return p.parse_args(argv)
 
 

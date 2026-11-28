@@ -185,14 +185,24 @@ class PowerBIDemo(unittest.TestCase):
             self.assertIsNone(powerbi.reponer(Path(tmp) / "no-existe.json"))
         api.assert_not_called()
 
-    def test_iniciar_sesion_abre_el_reporte_insertado_como_la_demo(self):
-        # La demo ve la sesión del iframe sobre la consola (almacenamiento particionado por sitio): iniciar
-        # sesión en el reporte suelto no le sirve. Al cerrar la ventana se comprueba como en la revisión previa.
-        import html
-        visitas, cuerpos = [], []
+    def test_revision_previa_abre_el_reporte_en_la_pestana_antes_del_iframe(self):
+        # La inserción segura guarda la sesión por pestaña («sign in whenever you open a new browser window or tab»):
+        # abierto antes como página, el reporte entra con la cookie de Entra del perfil y el iframe de esa pestaña la usa.
+        visitas = []
         pagina = mock.MagicMock()
         pagina.goto.side_effect = visitas.append
-        pagina.route.side_effect = lambda url, manejar: manejar(mock.MagicMock(fulfill=lambda **k: cuerpos.append(k["body"])))
+        url = powerbi.url_embebida("rep-1", "t-123")
+        with (mock.patch.object(powerbi, "abrir_perfil", return_value=mock.MagicMock(pages=[pagina])),
+              mock.patch("playwright.sync_api.sync_playwright")):
+            self.assertIsNone(powerbi.problema_sesion(url, "http://127.0.0.1:8050"))
+        self.assertEqual(visitas, [url, "http://127.0.0.1:8050" + powerbi.PRUEBA])
+
+    def test_iniciar_sesion_abre_el_reporte_como_pagina_y_lo_comprueba(self):
+        # Entra guarda la sesión persistente al iniciarla en una página, no dentro del iframe. Al cerrar la
+        # ventana se comprueba como en la revisión previa.
+        visitas = []
+        pagina = mock.MagicMock()
+        pagina.goto.side_effect = visitas.append
         insertada = powerbi.url_embebida("rep-1", "t-123")
         with (tempfile.TemporaryDirectory() as tmp,
               mock.patch.object(powerbi, "ESTADO", Path(tmp) / "estado.json"),
@@ -203,8 +213,7 @@ class PowerBIDemo(unittest.TestCase):
               mock.patch("playwright.sync_api.sync_playwright"), mock.patch("builtins.print")):
             powerbi.ESTADO.write_text(json.dumps({"report_id": "rep-1"}), encoding="utf-8")
             problema = powerbi.iniciar_sesion("http://127.0.0.1:8050")
-        self.assertEqual(visitas, ["http://127.0.0.1:8050/__demo/prueba-powerbi"])
-        self.assertIn(html.escape(insertada), cuerpos[0])
+        self.assertEqual(visitas, [insertada])
         comprobar.assert_called_once_with(insertada, "http://127.0.0.1:8050")
         self.assertEqual(problema, "sigue sin dibujarse")
 
