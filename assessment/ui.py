@@ -55,6 +55,7 @@ ASSETS = {
     "/favicon.svg": ("favicon.svg", "image/svg+xml"),
     "/brand-mark.png": ("brand-mark.png", "image/png"),
 }
+LOGO = re.compile(r"/logos/([a-z0-9-]+\.svg)")  # sin «..» ni barras: solo archivos de static/logos
 COPILOT_FILES = {
     "/copilot/openapi.yaml": "openapi.yaml",
     "/copilot/security-copilot-skill.yaml": "security-copilot-skill.yaml",
@@ -263,6 +264,10 @@ class DemoHandler(BaseHTTPRequestHandler):
         if clean_path in ASSETS:
             name, mime = ASSETS[clean_path]
             self.send_content(200, (STATIC / name).read_bytes(), mime)
+            return
+        logo = LOGO.fullmatch(clean_path)
+        if logo and (STATIC / "logos" / logo.group(1)).is_file():
+            self.send_content(200, (STATIC / "logos" / logo.group(1)).read_bytes(), "image/svg+xml")
             return
         if clean_path in COPILOT_FILES:
             target = COPILOT_DIR / COPILOT_FILES[clean_path]

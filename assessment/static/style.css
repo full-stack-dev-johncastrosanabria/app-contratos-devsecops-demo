@@ -1267,6 +1267,13 @@ input:disabled {
   line-height: 1.35;
   color: var(--ink-muted);
 }
+.stage-tool .tool { white-space: nowrap; } /* el logo no se separa de su nombre al partir la línea */
+.tool-logo {
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  vertical-align: -2px;
+}
 
 /* One button per cell: the result, its evidence line and any warning */
 .ledger-cell,

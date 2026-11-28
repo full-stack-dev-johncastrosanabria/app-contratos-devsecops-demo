@@ -822,7 +822,7 @@ function renderLedger() {
       label.append(
         element("span", `Etapa ${meta.numero}: `, "sr-only"),
         element("span", meta.etapa, "stage-name"),
-        termText("span", meta.herramienta, "stage-tool")
+        toolLine(meta.herramienta)
       );
       if (tr.dataset.scope === "decide") label.append(element("span", "Decide REN-001", "scope-tag is-decisive"));
       else if (tr.dataset.scope === "contexto") label.append(element("span", "Contexto · fuera de REN-001", "scope-tag"));
@@ -884,7 +884,7 @@ function renderLedgerFoot(shown) {
   th.scope = "row";
   th.setAttribute("role", "rowheader");
   const label = element("span", null, "stage-label");
-  label.append(element("span", "Decisión humana", "stage-name"), element("span", "Azure Boards", "stage-tool"));
+  label.append(element("span", "Decisión humana", "stage-name"), toolLine("Azure Boards"));
   th.append(label);
   row.append(th);
   for (const v of shown) {
@@ -1090,6 +1090,38 @@ function termText(tag, text, className) {
     } else if (part) {
       node.append(part);
     }
+  }
+  return node;
+}
+
+// Logo de cada herramienta (static/logos, ver CREDITOS.md). El nombre sigue como texto: el logo es decorativo.
+const TOOL_LOGOS = {
+  "Azure Boards": "azure-devops", GitHub: "github", "VS Code": "vscode", Copilot: "copilot",
+  SonarQube: "sonarqube", Trivy: "trivy", CodeQL: "codeql", Dependabot: "dependabot",
+  "Azure Pipelines": "azure-pipelines", Actions: "actions", xUnit: "xunit",
+  "Container Apps": "container-apps", "AKS Ready": "aks", "Defender for Cloud": "defender",
+  Monitor: "monitor", "App Insights": "app-insights", "Power BI": "power-bi", "AI Foundry": "ai-foundry",
+};
+
+function toolLine(text) {
+  const node = element("span", null, "stage-tool");
+  for (const part of String(text ?? "").split(/( \+ | · )/)) {
+    if (part === " + " || part === " · ") {
+      // El separador viaja con la herramienta anterior: la línea nunca empieza con «·» ni «+».
+      if (node.lastElementChild) node.lastElementChild.append(part.trimEnd());
+      node.append(node.lastElementChild ? " " : part);
+      continue;
+    }
+    if (!part) continue;
+    const tool = termText("span", part, "tool");
+    if (TOOL_LOGOS[part]) {
+      const logo = element("img", null, "tool-logo");
+      logo.src = `/logos/${TOOL_LOGOS[part]}.svg`;
+      logo.alt = "";
+      logo.width = logo.height = 14; // reserva el hueco antes de que cargue
+      tool.prepend(logo);
+    }
+    node.append(tool);
   }
   return node;
 }

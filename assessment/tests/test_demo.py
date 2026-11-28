@@ -257,6 +257,16 @@ class GuionReal(unittest.TestCase):
         self.assertTrue(clics)
         self.assertTrue(all(p.get("confirmar") for p in clics), clics)
 
+    def test_guion_real_logos_e_iconos(self):
+        slides = {p["plantilla"]: p for e in self.g["escenas"] for p in e["pasos"] if p["tipo"] == "slide"}
+        logos = Path(__file__).resolve().parents[1] / "static" / "logos"
+        fuentes = slides["pregunta"]["fuentes"]
+        self.assertEqual([f["nombre"] for f in fuentes], ["Azure Boards", "GitHub", "Pipelines", "Azure Monitor"])
+        for f in fuentes:  # la consola sirve /logos/<nombre>.svg desde assessment/static/logos
+            self.assertRegex(f["logo"], r"^/logos/[a-z0-9-]+\.svg$")
+            self.assertTrue((logos / f["logo"].removeprefix("/logos/")).is_file(), f["logo"])
+        self.assertEqual([t["icono"] for t in slides["cierre"]["tesis"]], ["investigar", "evidencia", "humano"])
+
     def test_guion_real_ventana(self):
         g = guion.filtrar(self.g, "agente")
         pasos = [p for e in g["escenas"] for p in e["pasos"]]

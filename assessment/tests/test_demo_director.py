@@ -109,6 +109,29 @@ class DirectorEnPagina(unittest.TestCase):
             page.wait_for_function("() => window.__fin !== null", timeout=3000)
             self.assertLess(page.evaluate("() => window.__fin"), 500, duracion)
 
+    def test_pregunta_pone_el_logo_de_cada_fuente(self):
+        page = self.abrir()
+        page.evaluate("() => __director.slide('pregunta', {pregunta: '¿?', remate: 'r', fuentes: [{nombre: 'GitHub', logo: '/logos/github.svg'}, 'Sin logo']})")
+        islas = page.evaluate("""() => [...document.querySelector('#demo-director').shadowRoot.querySelectorAll('.islas li')].map((li) => {
+            const img = li.querySelector('img');
+            return {texto: li.textContent.trim(), logo: img ? img.getAttribute('src') : null, alt: img ? img.getAttribute('alt') : null,
+                    nodo: Boolean(li.querySelector('.nodo'))};
+        })""")
+        self.assertEqual(islas, [{"texto": "GitHub", "logo": "/logos/github.svg", "alt": "", "nodo": False},
+                                 {"texto": "Sin logo", "logo": None, "alt": None, "nodo": True}])
+
+    def test_cierre_pone_un_icono_propio_por_tesis(self):
+        page = self.abrir()
+        page.evaluate("() => __director.slide('cierre', {tesis: [{texto: 'a', icono: 'investigar'}, {texto: 'b', icono: 'evidencia'}, {texto: 'c', icono: 'humano'}, 'd']})")
+        tesis = page.evaluate("""() => [...document.querySelector('#demo-director').shadowRoot.querySelectorAll('.tesis li')].map((li) => {
+            const svg = li.querySelector('svg.ico');
+            return {texto: li.querySelector('p').textContent, forma: svg ? svg.innerHTML : '', nodo: Boolean(li.querySelector('.nodo'))};
+        })""")
+        self.assertEqual([t["texto"] for t in tesis], ["a", "b", "c", "d"])
+        self.assertTrue(all(t["forma"] and not t["nodo"] for t in tesis[:3]), tesis)
+        self.assertEqual(len({t["forma"] for t in tesis[:3]}), 3)  # un dibujo distinto por idea
+        self.assertEqual((tesis[3]["forma"], tesis[3]["nodo"]), ("", True))  # sin icono, el nodo de siempre
+
     def test_siguiente_corta(self):
         page = self.abrir()
         page.evaluate("() => { window.__t0 = performance.now(); window.__fin = null; __director.decir('línea', null, 5).then(() => { window.__fin = performance.now() - window.__t0; }); }")

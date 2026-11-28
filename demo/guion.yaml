@@ -22,7 +22,11 @@ escenas:
       - tipo: slide
         plantilla: pregunta
         pregunta: ¿Qué evidencia tenemos de que esta versión cumple lo acordado?
-        fuentes: [Azure Boards, GitHub, Pipelines, Azure Monitor]
+        fuentes:
+          - {nombre: Azure Boards, logo: /logos/azure-devops.svg}
+          - {nombre: GitHub, logo: /logos/github.svg}
+          - {nombre: Pipelines, logo: /logos/azure-pipelines.svg}
+          - {nombre: Azure Monitor, logo: /logos/monitor.svg}
         remate: Un pipeline en verde no equivale a evidencia.
         voz: >-
           Solemos ver los checks en verde y dar por hecho que una versión está lista. Pero si un auditor
@@ -527,9 +531,9 @@ escenas:
       - tipo: slide
         plantilla: cierre
         tesis:
-          - Los agentes investigan; una política determinista decide
-          - Un pipeline en verde no equivale a evidencia del criterio
-          - Ninguna tarea entra al backlog sin una decisión humana
+          - {texto: "Los agentes investigan; una política determinista decide", icono: investigar}
+          - {texto: "Un pipeline en verde no equivale a evidencia del criterio", icono: evidencia}
+          - {texto: "Ninguna tarea entra al backlog sin una decisión humana", icono: humano}
         cta: Una aplicación crítica · sus dos últimas entregas · dos semanas
         voz: >-
           Para aterrizarlo en su contexto, les propongo algo concreto: elijamos una aplicación crítica y sus

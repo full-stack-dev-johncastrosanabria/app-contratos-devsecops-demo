@@ -349,6 +349,11 @@
     flecha: '<path d="M4 12h15M13.5 6.5 19 12l-5.5 5.5"/>',
     documento: '<path d="M7 3.5h7l4 4v13H7z"/><path d="M14 3.5v4h4M10 12.5h5M10 16h5"/>',
     globo: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.1 3.6 8.5s-1.2 6.2-3.6 8.5c-2.4-2.3-3.6-5.1-3.6-8.5s1.2-6.2 3.6-8.5Z"/>',
+    // Tesis del cierre: tres agentes que convergen en un rombo de decisión; una lupa que revisa el check verde;
+    // una persona frente al backlog.
+    investigar: '<circle cx="5" cy="5" r="2"/><circle cx="5" cy="12" r="2"/><circle cx="5" cy="19" r="2"/><path d="M6.8 6.1 13.7 11.2M7 12h6.6M6.8 17.9l6.9-5.1"/><path d="M18 8.2 21.8 12 18 15.8 14.2 12z"/>',
+    evidencia: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.3 15.3 5.2 5.2"/><path d="m7.6 10.7 2 2 3.6-4"/>',
+    humano: '<circle cx="7.5" cy="7.5" r="3"/><path d="M2.5 19.5c0-3.3 2.2-5.5 5-5.5s5 2.2 5 5.5"/><path d="M15 7.5h6.5M15 12h6.5M15 16.5h4"/>',
   };
   const iconoSvg = (nombre) => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${ICONOS[nombre]}</svg>`;
   const CURSOR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 2.5v16.7l4.6-4.3 3.2 6.7 2.9-1.3-3.1-6.6 6.3-.3z" fill="#ffffff" stroke="#081c3a" stroke-width="1.5" stroke-linejoin="round"/></svg>';
@@ -830,7 +835,12 @@
     pregunta: ({ pregunta, fuentes = [], remate }) => h("div", { class: "s-pregunta" },
       h("h1", { class: "entra" }, pregunta),
       fuentes.length > 0 && h("ul", { class: "islas", style: `--n:${fuentes.length}` },
-        fuentes.map((f) => h("li", { class: "entra" }, h("span", { class: "nodo" }), h("span", { class: "nombre" }, f)))),
+        fuentes.map((f) => {
+          const fuente = typeof f === "string" ? { nombre: f } : f || {};
+          return h("li", { class: "entra" },
+            fuente.logo ? h("span", { class: "logo" }, h("img", { src: fuente.logo, alt: "" })) : h("span", { class: "nodo" }),
+            h("span", { class: "nombre" }, fuente.nombre));
+        })),
       h("p", { class: "remate entra" }, remate)),
 
     caso: ({ regla, entregas = [] }) => h("div", { class: "s-caso" },
@@ -899,7 +909,12 @@
       conHtml("doc-cuerpo", html)),
 
     cierre: ({ tesis = [], cta }) => h("div", { class: "s-cierre" },
-      h("ul", { class: "tesis" }, tesis.map((t) => h("li", { class: "entra" }, h("span", { class: "nodo" }), h("p", {}, t)))),
+      h("ul", { class: "tesis" }, tesis.map((t) => {
+        const idea = typeof t === "string" ? { texto: t } : t || {};
+        return h("li", { class: "entra" },
+          ICONOS[idea.icono] ? h("span", { class: "insignia" }, icono(idea.icono)) : h("span", { class: "nodo" }),
+          h("p", {}, idea.texto));
+      })),
       cta && h("p", { class: "cta entra" }, icono("flecha"), h("span", {}, cta))),
   };
 

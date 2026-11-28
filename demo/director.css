@@ -243,6 +243,18 @@
   background: var(--navy-hondo);
 }
 .islas .nombre { font-size: clamp(1.125rem, 0.8rem + 0.7vw, 1.5rem); font-weight: 600; line-height: 1.3; }
+/* Con logo, la isla es una ficha blanca (los logos de marca no se recolorean) y la línea parte de su centro. */
+.islas .logo {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px rgba(124, 157, 240, 0.45), 0 12px 28px -14px rgba(0, 0, 0, 0.7);
+}
+.islas .logo img { width: 34px; height: 34px; object-fit: contain; }
+.islas li:has(.logo)::after { top: 27px; left: 70px; }
 .remate {
   margin: clamp(48px, 7vh, 76px) 0 0;
   max-width: 34ch;
@@ -475,6 +487,21 @@
   border-radius: 50%;
   background: var(--navy-hondo);
 }
+.tesis li:has(.insignia) { padding-top: 46px; }
+.tesis .insignia {
+  position: absolute;
+  top: -23px;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 2px solid var(--senal);
+  border-radius: 50%;
+  background: var(--navy-hondo);
+  color: var(--senal);
+}
+.tesis .insignia .ico { width: 24px; height: 24px; }
 .tesis p {
   margin: 0;
   font-size: clamp(1.5rem, 0.9rem + 1.35vw, 2.35rem);

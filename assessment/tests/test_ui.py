@@ -139,8 +139,62 @@ class DemoHTTP(unittest.TestCase):
                 server.shutdown()
 
 
+class Logos(unittest.TestCase):
+    def test_sirve_los_logos_y_nada_mas(self):
+        with ThreadingHTTPServer(("127.0.0.1", 0), DemoHandler) as server:
+            Thread(target=server.serve_forever, daemon=True).start()
+            try:
+                def pedir(ruta):
+                    conn = HTTPConnection("127.0.0.1", server.server_port, timeout=10)
+                    conn.request("GET", ruta)
+                    resp = conn.getresponse()
+                    cuerpo = resp.read()
+                    conn.close()
+                    return resp.status, resp.getheader("Content-Type"), cuerpo
+
+                estado, tipo, cuerpo = pedir("/logos/github.svg")
+                self.assertEqual((estado, tipo.split(";")[0]), (200, "image/svg+xml"))
+                self.assertIn(b"<svg", cuerpo)
+                for ruta in ("/logos/no-existe.svg", "/logos/GitHub.svg", "/logos/../app.js", "/logos/..%2Fapp.js",
+                             "/logos/github.svg.bak", "/logos/", "/logos/CREDITOS.md"):
+                    self.assertEqual(pedir(ruta)[0], 404, ruta)
+            finally:
+                server.shutdown()
+
+
 @unittest.skipIf(sync_playwright is None, "Playwright no está instalado")
 class ConsolaEnNavegador(unittest.TestCase):
+    def test_cada_herramienta_de_la_etapa_lleva_su_logo(self):
+        with ThreadingHTTPServer(("127.0.0.1", 0), DemoHandler) as server:
+            Thread(target=server.serve_forever, daemon=True).start()
+            try:
+                with sync_playwright() as pw:
+                    try:
+                        browser = pw.chromium.launch(channel="chrome", headless=True)
+                    except Exception as exc:  # pragma: no cover - sin Google Chrome instalado
+                        self.skipTest(f"Chrome no disponible: {exc}")
+                    page = browser.new_page(viewport={"width": 1440, "height": 900})
+                    page.route("**/api/**", lambda r: r.fulfill(status=200, content_type="application/json", body="{}"))
+                    page.goto(f"http://127.0.0.1:{server.server_port}/")
+                    page.wait_for_function("() => document.querySelectorAll('.stage-tool').length === 9"
+                                           " && [...document.querySelectorAll('.stage-tool img')].every((i) => i.complete)")
+                    filas = page.evaluate("""() => [...document.querySelectorAll('.stage-tool')].map((s) => {
+                        const imgs = [...s.querySelectorAll('img')];
+                        return {texto: s.textContent, logos: imgs.map((i) => i.getAttribute('src')), abbr: Boolean(s.querySelector('abbr')),
+                                cargados: imgs.every((i) => i.naturalWidth > 0), decorativos: imgs.every((i) => i.alt === '')};
+                    })""")
+                    browser.close()
+            finally:
+                server.shutdown()
+        self.assertEqual(filas[1]["texto"], "GitHub + VS Code + Copilot")  # el nombre sigue siendo texto
+        self.assertEqual(filas[1]["logos"], ["/logos/github.svg", "/logos/vscode.svg", "/logos/copilot.svg"])
+        self.assertEqual(filas[2]["logos"], ["/logos/sonarqube.svg", "/logos/trivy.svg", "/logos/codeql.svg", "/logos/dependabot.svg"])
+        self.assertEqual(filas[7]["logos"], ["/logos/ai-foundry.svg"])  # Fabric y Security Copilot no tienen logo oficial
+        self.assertEqual(filas[8]["logos"], ["/logos/azure-devops.svg"])  # la fila «Decisión humana» también es Boards
+        self.assertEqual(sum(len(f["logos"]) for f in filas), 19)
+        self.assertTrue(filas[4]["abbr"])  # «AKS» conserva su glosario
+        self.assertTrue(all(f["cargados"] and f["decorativos"] for f in filas), filas)
+
     """La consola servida de verdad en Chrome headless; las /api/ se simulan para no tocar integraciones reales."""
 
     def test_consola_elige_el_caso(self):
