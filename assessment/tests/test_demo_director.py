@@ -92,6 +92,17 @@ class DirectorEnPagina(unittest.TestCase):
         self.assertLess(ms, 300)
         self.assertTrue(page.evaluate("() => __director.estado().terminado"))
 
+    def test_foco_espera_al_elemento_que_aparece_tarde(self):
+        # La consola dibuja algunas piezas tras una llamada al servidor (p. ej. la plantilla de remediación).
+        from demo.__main__ import Corrida
+        page = self.abrir()
+        page.evaluate("() => setTimeout(() => { const d = document.createElement('div'); d.id = 'tarde';"
+                      " d.style.cssText = 'width:120px;height:40px'; document.body.append(d); }, 400)")
+        corrida = Corrida({"escenas": []}, {"Mira esto.": {"archivo": None, "duracion": 0.2}}, sin_voz=True, ensayo=True)
+        corrida.page = page
+        corrida._narrar({"tipo": "narrar", "voz": "Mira esto.", "foco": "#tarde"}, {"narracion_s": 0.0})
+        self.assertEqual(corrida.fallos, [])
+
     def test_layout_sin_solapes(self):
         for ancho, alto in ((1440, 900), (1920, 1080)):
             with self.subTest(viewport=f"{ancho}x{alto}"):

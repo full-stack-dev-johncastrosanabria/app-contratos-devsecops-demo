@@ -438,6 +438,11 @@ class Corrida:
             return
         opciones = {"etiqueta": paso.get("etiqueta")}
         lupa = False
+        if paso.get("foco"):
+            try:  # como clic y lupa: la pieza puede aparecer tras una llamada al servidor
+                self.page.locator(paso["foco"]).first.wait_for(state="visible", timeout=ESPERA_ELEMENTO_MS)
+            except TiempoAgotado:
+                pass  # foco() devolverá false y quedará como fallo
         if paso.get("lupa"):
             self.js("() => __director.foco(null)")
             lupa = self.lupa(paso["lupa"], opciones)
