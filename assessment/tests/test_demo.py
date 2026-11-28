@@ -8,7 +8,7 @@ import unittest
 from unittest import mock
 import urllib.error
 
-from demo import guion, powerbi
+from demo import documento, guion, powerbi
 
 MINIMO = {
     "voz": "es-MX-DaliaMultilingualNeural",
@@ -245,6 +245,36 @@ class RunnerPrevio(unittest.TestCase):
             self.assertTrue(trivy_vigente(meta, ahora))
             meta.write_text(json.dumps({"NextUpdate": "2026-11-26T13:04:37.454241698Z"}))
             self.assertFalse(trivy_vigente(meta, ahora))
+
+
+
+class DocumentoMarkdown(unittest.TestCase):
+    def test_tabla_markdown_a_html(self):
+        self.assertEqual(
+            documento.a_html("| a | b |\n|---|---|\n| 1 | **2** |"),
+            "<table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>1</td><td><strong>2</strong></td></tr></tbody></table>")
+
+    def test_escapa_html(self):
+        html = documento.a_html("<script>x</script>")
+        self.assertIn("&lt;script&gt;", html)
+        self.assertNotIn("<script>", html)
+
+    def test_secciones_elegidas(self):
+        informe = ("# REN-001 · v2\n\n**INCUMPLIDO**\n\n"
+                   "## Matriz de criterios evaluados\n\n| Criterio | Veredicto |\n| --- | --- |\n| `REN-001` | `INCUMPLIDO` |\n\n"
+                   "## Diagnóstico\n\n- Aserción en línea 26\n\n"
+                   "## Siguiente paso\n\nCorregir la exclusión de cancelados.\n")
+        html = documento.a_html(informe, secciones=["Matriz de criterios evaluados"])
+        self.assertTrue(html.startswith("<h1>REN-001 · v2</h1>"), html)
+        self.assertIn("<h2>Matriz de criterios evaluados</h2>", html)
+        self.assertIn("<td><code>REN-001</code></td>", html)
+        for fuera in ("INCUMPLIDO</strong>", "Diagnóstico", "Siguiente paso"):
+            self.assertNotIn(fuera, html)
+
+    def test_enlaces_y_listas_anidadas_sin_markdown_crudo(self):
+        html = documento.a_html("- Archivos en [informe.json](informe.json) · 6\n  - TRX `Cancelado` · `Failed`\n- Fin")
+        self.assertEqual(html, '<ul><li>Archivos en <span class="enlace">informe.json</span> · 6'
+                               "<ul><li>TRX <code>Cancelado</code> · <code>Failed</code></li></ul></li><li>Fin</li></ul>")
 
 
 if __name__ == "__main__":

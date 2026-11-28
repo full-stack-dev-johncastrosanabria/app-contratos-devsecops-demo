@@ -641,6 +641,14 @@
 .s-documento .doc-cuerpo ul { padding-left: 22px; }
 .s-documento .doc-cuerpo li + li { margin-top: 4px; }
 .s-documento .doc-cuerpo strong { color: #081c3a; font-weight: 700; }
+.s-documento .doc-cuerpo .enlace {
+  color: #154694;
+  text-decoration: underline;
+  text-decoration-color: #9ab5dc;
+  text-underline-offset: 3px;
+}
+.s-documento .doc-cuerpo li > ul { margin: 4px 0 0; }
+.s-documento .doc-cuerpo td code { white-space: nowrap; }
 .s-documento .doc-cuerpo code {
   padding: 1px 6px;
   border-radius: 6px;
