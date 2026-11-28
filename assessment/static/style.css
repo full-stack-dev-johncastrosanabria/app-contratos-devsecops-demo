@@ -2101,6 +2101,7 @@ input:disabled {
   margin: 0;
   flex: 1 1 auto;
   min-inline-size: 0;
+  contain: inline-size; /* una línea larga se desplaza dentro del bloque sin ensanchar ninguna columna */
   overflow-x: auto;
   padding: var(--space-3);
   padding-inline-end: 6.5rem;

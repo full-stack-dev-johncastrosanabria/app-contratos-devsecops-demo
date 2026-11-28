@@ -197,6 +197,47 @@ class ConsolaEnNavegador(unittest.TestCase):
 
     """La consola servida de verdad en Chrome headless; las /api/ se simulan para no tocar integraciones reales."""
 
+    def test_una_linea_larga_de_codigo_no_ensancha_la_consola(self):
+        # Una línea de C# más ancha que la columna se desplaza dentro de su bloque: si ensancha la página,
+        # la consola entera se corre a la izquierda (la demo lo mostró al enfocar la remediación).
+        linea = "var aviso = new Aviso(contrato.Id, contrato.Correo, contrato.Renovacion, dias, contrato.Cliente.Nombre, contrato.Cliente.Segmento);"
+        with ThreadingHTTPServer(("127.0.0.1", 0), DemoHandler) as server:
+            Thread(target=server.serve_forever, daemon=True).start()
+            try:
+                with sync_playwright() as pw:
+                    try:
+                        browser = pw.chromium.launch(channel="chrome", headless=True)
+                    except Exception as exc:  # pragma: no cover - sin Google Chrome instalado
+                        self.skipTest(f"Chrome no disponible: {exc}")
+                    page = browser.new_page(viewport={"width": 1440, "height": 900})
+                    page.route("**/api/**", lambda r: r.fulfill(status=200, content_type="application/json", body="{}"))
+                    page.goto(f"http://127.0.0.1:{server.server_port}/")
+                    medir = """(linea) => {
+                        const card = document.querySelector('article.card');
+                        for (let el = card; el; el = el.parentElement) el.hidden = false;
+                        const rem = card.querySelector('.remediation');
+                        rem.innerHTML = '<div class="rem-panel"><div class="rem-output"><div class="copyable">'
+                          + '<span class="copy"><button class="copy-button" type="button">Copiar C#</button></span>'
+                          + '<pre class="rem-pre" tabindex="0"><code></code></pre></div><p class="rem-disclaimer">nota</p></div></div>';
+                        rem.querySelector('code').textContent = linea;
+                        const caja = (el) => { const b = el.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.right)]; };
+                        const medida = () => ({pagina: document.documentElement.scrollWidth, vista: innerWidth,
+                            pre: caja(rem.querySelector('.rem-pre')), card: caja(card), boton: caja(rem.querySelector('.copy-button')),
+                            bloque: caja(rem.querySelector('.copyable'))});
+                        const conPuntero = medida();
+                        rem.querySelector('.copyable').style.display = 'flex';  // la variante sin hover (pantallas táctiles)
+                        return {conPuntero, tactil: medida()};
+                    }"""
+                    d = page.evaluate(medir, linea)
+                    browser.close()
+            finally:
+                server.shutdown()
+        for variante, m in d.items():
+            self.assertGreater(m["pre"][1] - m["pre"][0], 0, f"{variante}: el bloque no se dibujó: {m}")
+            self.assertLessEqual(m["pagina"], m["vista"], f"{variante}: la línea ensancha la página: {m}")
+            self.assertLessEqual(m["pre"][1], m["card"][1], f"{variante}: el bloque se sale del expediente: {m}")
+            self.assertLessEqual(m["boton"][1], m["bloque"][1], f"{variante}: el botón Copiar queda fuera: {m}")
+
     def test_consola_elige_el_caso(self):
         with ThreadingHTTPServer(("127.0.0.1", 0), DemoHandler) as server:
             Thread(target=server.serve_forever, daemon=True).start()
