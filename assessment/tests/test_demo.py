@@ -1,5 +1,6 @@
 from copy import deepcopy
 import json
+import os
 import shutil
 from pathlib import Path
 import struct
@@ -377,7 +378,7 @@ class PdfDelRecorrido(unittest.TestCase):
                 {"archivo": "001.png", "donde": "portada · paso 1", "texto": "Hola <b>ustedes</b>", "error": False, "t": 1.0},
                 {"archivo": "002.png", "donde": "caso · paso 3", "texto": "no apareció «#x»", "error": True, "t": 42.5},
             ]), encoding="utf-8")
-            ruta = runner.armar_pdf(carpeta)
+            ruta = runner.armar_pdf(Path(os.path.relpath(carpeta)))  # como en GUION_DEMO.md: ruta relativa al repo
             pdf = ruta.read_bytes()
             self.assertTrue(pdf.startswith(b"%PDF"))
             self.assertEqual(len(re.findall(rb"/Type\s*/Page\b(?!s)", pdf)), 2)

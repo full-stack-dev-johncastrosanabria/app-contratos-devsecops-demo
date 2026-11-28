@@ -874,7 +874,7 @@ def armar_pdf(carpeta: Path) -> Path:
         navegador = pw.chromium.launch(channel="chrome", headless=True)
         try:
             pestana = navegador.new_page()
-            pestana.goto(pagina.as_uri(), wait_until="load")
+            pestana.goto(pagina.resolve().as_uri(), wait_until="load")
             pestana.pdf(path=str(ruta), width="1440px", height="1010px", print_background=True)
         finally:
             navegador.close()
