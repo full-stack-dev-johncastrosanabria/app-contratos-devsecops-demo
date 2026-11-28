@@ -92,6 +92,24 @@ class DirectorEnPagina(unittest.TestCase):
         self.assertLess(ms, 300)
         self.assertTrue(page.evaluate("() => __director.estado().terminado"))
 
+    def subtitulo_visible(self, page) -> bool:
+        return page.evaluate("() => document.querySelector('#demo-director').shadowRoot"
+                             ".querySelector('.subtitulos').hasAttribute('data-visible')")
+
+    def test_con_voz_no_hay_subtitulo(self):
+        page = self.abrir()
+        # En la misma tarea JS: antes de que el clip pueda fallar y degradar a subtítulo.
+        self.assertFalse(page.evaluate(
+            "() => { __director.decir('Con voz.', 'data:audio/mpeg;base64,AAAA', 5);"
+            " return document.querySelector('#demo-director').shadowRoot.querySelector('.subtitulos').hasAttribute('data-visible'); }"))
+
+    def test_si_el_clip_falla_vuelve_el_subtitulo(self):
+        page = self.abrir()
+        page.evaluate("() => { __director.decir('Sin audio.', 'data:audio/mpeg;base64,AAAA', 5); }")
+        page.wait_for_function("() => document.querySelector('#demo-director').shadowRoot"
+                               ".querySelector('.subtitulos').hasAttribute('data-visible')", timeout=3000)
+        self.assertTrue(self.subtitulo_visible(page))
+
     def test_foco_espera_al_elemento_que_aparece_tarde(self):
         # La consola dibuja algunas piezas tras una llamada al servidor (p. ej. la plantilla de remediación).
         from demo.__main__ import Corrida

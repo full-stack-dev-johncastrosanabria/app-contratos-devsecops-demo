@@ -171,7 +171,7 @@
     montar();
     if (est.terminado) return Promise.resolve();
     if (linea) linea.terminar();
-    mostrarSubtitulo(String(texto ?? ""));
+    if (!url) mostrarSubtitulo(String(texto ?? "")); // con voz, solo la voz
     const dur = Math.max(0, Number(duracion) || 0);
     return new Promise((resolver) => {
       const actual = { clip: null, respaldo: temporizador(url ? dur + 2 : dur), degradar: () => {} };
@@ -202,6 +202,7 @@
           if (hecho || !actual.clip) return;
           actual.clip = null;
           actual.respaldo.ajustar(-2);
+          mostrarSubtitulo(String(texto ?? "")); // sin audio, que la línea no quede muda
         };
         clip.addEventListener("ended", actual.terminar);
         clip.addEventListener("error", actual.degradar);

@@ -1,4 +1,5 @@
-# Guion narrado de la demo REN-001 (python -m demo). Cada línea de voz es también su subtítulo.
+# Guion narrado de la demo REN-001 (python -m demo). Con voz no hay subtítulos; sin audio (--sin-voz,
+# ensayo o un clip que falla) cada línea se muestra como subtítulo.
 # Los pasos con «motor» solo corren con ese motor; el ensayo usa solo-evidencia.
 # Los botones que se arman con doble pulsación cambian de texto: se ubican por CSS, nunca por su nombre.
 voz: es-MX-DaliaMultilingualNeural
