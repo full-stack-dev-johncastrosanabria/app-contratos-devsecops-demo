@@ -597,7 +597,7 @@ def escribir_registro(corrida: Corrida, args, sello: str, grabacion: Path | None
         "velocidad": VELOCIDAD_ENSAYO if args.ensayo else args.velocidad,
         "motor": args.motor,
         "ensayo": args.ensayo,
-        "sin_voz": args.sin_voz,
+        "sin_voz": args.sin_voz or args.ensayo,
         "grabacion": str(grabacion) if grabacion and grabacion.is_file() else None,
         "escenas": [redondear({"transcurrido_s": corrida.total_s, **fila}) for fila in corrida.filas],
         "total_s": round(corrida.total_s, 1),
@@ -617,7 +617,8 @@ def _argumentos(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--motor", choices=guion.MOTORES, default="agente", help="motor de la evaluación")
     p.add_argument("--sin-voz", action="store_true", help="solo subtítulos, sin audio")
     p.add_argument("--sin-grabar", action="store_true", help="no grabar pantalla y audio en ~/Movies")
-    p.add_argument("--ensayo", action="store_true", help="recorrido rápido (×6, solo evidencia, sin voz ni grabación)")
+    p.add_argument("--ensayo", action="store_true",
+                   help="recorrido rápido (×6, solo evidencia, sin audio ni grabación); genera los clips que falten salvo con --sin-voz")
     p.add_argument("--ventana", action="store_true", help="ventana de 1440×900 en vez de pantalla completa")
     p.add_argument("--guion", type=Path, default=DEMO / "guion.yaml")
     return p.parse_args(argv)
@@ -630,7 +631,7 @@ def _como_ctrl_c(_signum, _frame):
 def main(argv: list[str] | None = None) -> int:
     args = _argumentos(argv)
     if args.ensayo:
-        args.motor, args.sin_voz, args.sin_grabar = "solo-evidencia", True, True
+        args.motor, args.sin_grabar = "solo-evidencia", True  # la voz se genera (salvo --sin-voz) pero no suena
     g = guion.cargar(args.guion)
     errores = guion.validar(g)
     if errores:
@@ -656,7 +657,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 _aviso("Sin permiso de Grabación de pantalla para esta terminal: la demo no se grabará "
                        "(Ajustes del Sistema → Privacidad y seguridad → Grabación de pantalla y audio del sistema)")
-        corrida = Corrida(g, clips, args.sin_voz, args.ensayo)
+        corrida = Corrida(g, clips, args.sin_voz or args.ensayo, args.ensayo)
         print("Presentando · Espacio pausa · → siguiente · < > velocidad · P paso a paso · Q Q terminar", flush=True)
         presentar(corrida, VELOCIDAD_ENSAYO if args.ensayo else args.velocidad, args.paso_a_paso, args.ventana, grabacion)
         if args.ensayo:

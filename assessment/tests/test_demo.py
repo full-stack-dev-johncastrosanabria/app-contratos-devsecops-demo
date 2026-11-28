@@ -137,6 +137,27 @@ class VozCache(unittest.TestCase):
             self.assertTrue(0 < voz.duracion_mp3(clip) < 3)
 
 
+GUION_REAL = Path(__file__).resolve().parents[2] / "demo/guion.yaml"
+IDS_ESCENAS = ["portada", "pregunta", "consola", "caso", "ejecutar", "mientras-corre", "dictamen",
+               "momento-v3", "etapas", "seguridad", "gobernanza", "remediacion", "valor", "cierre"]
+
+
+class GuionReal(unittest.TestCase):
+    def setUp(self):
+        self.g = guion.cargar(GUION_REAL)
+
+    def test_guion_real_valido(self):
+        self.assertEqual(guion.validar(self.g), [])
+        self.assertEqual([e["id"] for e in self.g["escenas"]], IDS_ESCENAS)
+
+    def test_guion_real_ventana(self):
+        g = guion.filtrar(self.g, "agente")
+        pasos = [p for e in g["escenas"] for p in e["pasos"]]
+        d = {t: guion.duracion_estimada(t) for t in guion.lineas(g)}
+        self.assertGreaterEqual(guion.proyectar(pasos, d, 1.25, "min", True), 480)
+        self.assertLessEqual(guion.proyectar(pasos, d, 0.75, "max", False), 720)
+
+
 class RunnerPrevio(unittest.TestCase):
     def test_rutas_sucias(self):
         from demo.__main__ import rutas_sucias
