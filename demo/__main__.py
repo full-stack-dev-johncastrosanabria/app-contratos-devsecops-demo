@@ -30,6 +30,7 @@ REPO = DEMO.parent
 RUNS = REPO / "assessment/runs"  # = assessment.ui.OUTPUT; importar ui tarda 5 s
 CONSOLA = "http://127.0.0.1:8050"
 PUERTO_SANDBOX = 5080  # = assessment.ui.SANDBOX_PORT
+PORTAL = f"http://127.0.0.1:{PUERTO_SANDBOX}"
 CABECERAS = {"Host": "127.0.0.1:8050", "Origin": CONSOLA, "Content-Type": "application/json"}
 REINICIO_COMPLETO = {"corridas": True, "sandbox": True, "boards": True, "codigo": True, "prs": True}
 RUTAS_DEMO = ("v1", "v2", "v3", "Dockerfile", "deploy", ".github")
@@ -402,6 +403,7 @@ class Corrida:
         self.ultimo_clic = time.monotonic()
         self.inquilino: str | None = None  # tenant de Entra para insertar el reporte de Power BI
         self.actions: dict = {}  # captura de GitHub Actions de la revisión previa: src, ancho, alto, cajas y titulo
+        self.marco = None  # Frame del portal :5080 mientras hay un paso «app» abierto: clic, narrar y esperar van dentro
 
     def previsto(self) -> dict[str, float]:
         """Total estimado por velocidad: las opcionales suenan mientras el total no pase de LIMITE_S."""
@@ -416,8 +418,8 @@ class Corrida:
         if (evento or {}).get("tipo") == "terminar":
             self.terminar = True
 
-    def js(self, codigo: str, arg=None):
-        resultado = self.page.evaluate(codigo, arg)
+    def js(self, codigo: str, arg=None, en=None):
+        resultado = (en or self.page).evaluate(codigo, arg)
         if self.terminar:
             raise Terminar()
         return resultado
@@ -464,7 +466,7 @@ class Corrida:
 
     def objetivo(self, selector: str):
         """El primer elemento del selector, ya en pantalla, y su caja; (None, None) si no aparece."""
-        loc = self.page.locator(selector).first
+        loc = (self.marco or self.page).locator(selector).first  # la caja sale en coordenadas de página
         try:
             loc.scroll_into_view_if_needed(timeout=ESPERA_ELEMENTO_MS)
             caja = loc.bounding_box()
@@ -485,7 +487,10 @@ class Corrida:
         if not loc:
             return
         self.apuntar(caja)
-        loc.click(timeout=ESPERA_ELEMENTO_MS)
+        if self.marco:  # un evento del propio frame: el iframe no toma el foco y el teclado sigue siendo del director
+            loc.dispatch_event("click")
+        else:
+            loc.click(timeout=ESPERA_ELEMENTO_MS)
         self.ultimo_clic = time.monotonic()
         if confirmar:
             self.page.wait_for_timeout(600)
@@ -524,6 +529,12 @@ class Corrida:
             self.omitidas.append(guion.lista(paso["voz"])[0][:60])
             return
         opciones = {"etiqueta": paso.get("etiqueta")}
+        if self.marco and paso.get("foco"):  # dentro del portal el foco va por caja: el director no ve el iframe por dentro
+            _, caja = self.objetivo(paso["foco"])
+            if caja:
+                self.js("([c, o]) => __director.foco(c, o)", [caja, opciones])
+            self.decir(paso["voz"], fila)
+            return
         lupa = False
         if paso.get("foco"):
             try:  # como clic y lupa: la pieza puede aparecer tras una llamada al servidor
@@ -587,7 +598,7 @@ class Corrida:
         inicio = self.estado()["transcurrido_s"]
         if listo is None:
             condicion = f"() => {{ try {{ return Boolean({paso['condicion']}); }} catch (e) {{ return false; }} }}"
-            listo = lambda: self.js(condicion)
+            listo = lambda: self.js(condicion, en=self.marco)
         relleno = guion.lista(paso.get("relleno"))
         reintentos = 0
 
@@ -619,6 +630,23 @@ class Corrida:
                 self.js("() => __director.esperar(500)")
         self.js("() => __director.enVivo(null)")
         fila["espera_s"] += self.estado()["transcurrido_s"] - inicio
+
+    def _app(self, paso: dict, fila: dict) -> None:
+        """El portal del sandbox dentro de la demo; los pasos hasta {cerrar: true} actúan dentro de él."""
+        self.js("() => __director.foco(null)")
+        if paso.get("cerrar"):
+            self.marco = None
+            self.js("() => __director.ocultarSlide()")
+            return
+        if paso.get("limpiar"):  # el portal lee datos.json en cada petición: la bandeja empieza vacía
+            from assessment.demo_reset import clean_sandbox_data
+            clean_sandbox_data(REPO)
+        self.js("([u, t]) => __director.slide('app', {url: u, titulo: t})", [PORTAL + "/", paso["titulo"]])
+        self.marco = self.page.locator("#demo-director .marco-app").element_handle(timeout=ESPERA_ELEMENTO_MS).content_frame()
+        try:
+            self.marco.wait_for_url(lambda url: url.startswith(PORTAL), timeout=ESPERA_ELEMENTO_MS)
+        except TiempoAgotado:
+            self.fallo(f"el portal {PORTAL} no cargó")
 
     def _reporte(self, paso: dict, fila: dict) -> None:
         """Power BI dentro de la demo: la slide inserta el reporte que la consola acaba de sincronizar."""
@@ -693,11 +721,21 @@ def presentar(corrida: Corrida, velocidad: float, paso_a_paso: bool, ventana: bo
 # ---------- Limpieza y registro ----------
 
 def limpiar(consola: subprocess.Popen | None, tocado: bool) -> None:
+    if tocado:
+        print("\nRestaurando el entorno…", flush=True)
+        try:  # primero el sandbox, mientras vive la consola que lo lanzó
+            _consola("POST", "/api/sandbox", {"accion": "detener"})
+        except (OSError, RuntimeError, ValueError) as exc:
+            _aviso(f"No se pudo detener el sandbox :{PUERTO_SANDBOX} ({exc})")
+        try:
+            from assessment.demo_reset import clean_sandbox_data
+            clean_sandbox_data(REPO)
+        except OSError as exc:
+            _aviso(f"No se pudieron borrar los datos del sandbox ({exc})")
     if consola is not None:
         detener_consola(consola)
     if not tocado:
         return
-    print("\nRestaurando el entorno…", flush=True)
     try:
         resumen = reiniciar_en_proceso() if consola is not None else reiniciar_por_http()
         _ok("Reinicio · " + resumen_reinicio(resumen))
@@ -716,7 +754,9 @@ def limpiar(consola: subprocess.Popen | None, tocado: bool) -> None:
     sucias = rutas_sucias(REPO)
     if sucias:
         _aviso("Quedan cambios en las rutas de la demo:\n" + "\n".join(f"      {l}" for l in sucias))
-    elif reiniciado:
+    if not puerto_libre(PUERTO_SANDBOX):
+        _aviso(f"Algo sigue escuchando en :{PUERTO_SANDBOX}; ciérralo antes de la próxima demo (lsof -i :{PUERTO_SANDBOX}).")
+    elif reiniciado and not sucias:
         print("Demo lista para volver a ejecutarse.", flush=True)
 
 

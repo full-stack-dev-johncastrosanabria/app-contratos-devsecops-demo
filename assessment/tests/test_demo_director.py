@@ -27,6 +27,13 @@ MEDIR_JS = """() => {
             cajas: Object.fromEntries([...raiz.querySelectorAll('.s-captura .caja')].map((el) => [el.dataset.caja, caja(el)]))};
 }"""
 
+# Portal del sandbox simulado: el botón escribe el resultado en #estado un momento después.
+PORTAL_FALSO = ("<!doctype html><body style='margin:0;font:16px system-ui'>"
+                "<button id='btn-simular' style='margin:40px'>Ejecutar simulación REN-001 →</button>"
+                "<p id='estado' role='status' style='margin:40px;width:420px;height:40px'></p>"
+                "<script>document.querySelector('#btn-simular').addEventListener('click', () => setTimeout(() => {"
+                " document.querySelector('#estado').textContent = '✕ INCUMPLIMIENTO REN-001 OBSERVADO'; }, 300));</script></body>")
+
 
 def pagina_actions(jobs, banner=False) -> str:
     """Corrida falsa con la lista lateral de la real (nav «Workflow run», un enlace por job) como data: URL."""
@@ -346,6 +353,35 @@ class DirectorEnPagina(unittest.TestCase):
         corrida._slide({"tipo": "slide", "plantilla": "captura", "voz": textos[2:], "focos": ["no-existe"]}, {"narracion_s": 0.0})
         self.assertEqual(len(corrida.fallos), 1)
         self.assertIn("no-existe", corrida.fallos[0])
+
+
+    def test_app_actua_dentro_del_portal_sin_robar_el_teclado(self):
+        from demo.__main__ import Corrida
+        page = self.abrir()
+        page.route("http://127.0.0.1:5080/**", lambda r: r.fulfill(content_type="text/html", body=PORTAL_FALSO))
+        corrida = Corrida({"escenas": []}, {"Miren el estado.": {"archivo": None, "duracion": 0.2}}, sin_voz=True, ensayo=True)
+        corrida.page = page
+        fila = {"narracion_s": 0.0, "espera_s": 0.0}
+        corrida._app({"tipo": "app", "titulo": "Portal de Contratos · v2"}, fila)
+        self.assertTrue(corrida.marco.url.startswith("http://127.0.0.1:5080"), corrida.marco.url)
+        corrida._clic({"tipo": "clic", "selector": "#btn-simular"}, fila)
+        corrida._esperar({"tipo": "esperar", "condicion": "document.querySelector('#estado').textContent.includes('OBSERVADO')",
+                          "max_s": 5, "espera_s": [0, 2]}, fila)
+        corrida._narrar({"tipo": "narrar", "voz": "Miren el estado.", "foco": "#estado"}, fila)
+        self.assertEqual(corrida.fallos, [])
+        page.wait_for_timeout(700)
+        caja = corrida.marco.locator("#estado").bounding_box()
+        hueco = page.evaluate("""() => { const b = document.querySelector('#demo-director').shadowRoot.querySelector('.foco').getBoundingClientRect();
+                                 return [b.left, b.top, b.width, b.height]; }""")
+        for real, esperado in zip(hueco, (caja["x"], caja["y"], caja["width"], caja["height"])):
+            self.assertAlmostEqual(real, esperado, delta=2)
+        page.keyboard.press("Space")  # el iframe nunca tomó el foco: el teclado sigue siendo del director
+        self.assertTrue(page.evaluate("() => __director.estado().pausado"))
+        page.keyboard.press("Space")
+        corrida._app({"tipo": "app", "cerrar": True}, fila)
+        self.assertIsNone(corrida.marco)
+        self.assertTrue(page.evaluate("() => document.querySelector('#demo-director').shadowRoot.querySelector('.slide').hidden"))
+        self.assertEqual(corrida.fallos, [])
 
 
 if __name__ == "__main__":

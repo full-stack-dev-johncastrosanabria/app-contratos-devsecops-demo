@@ -11,12 +11,14 @@ TIPOS: dict[str, tuple[str, ...]] = {
     "escribir": ("selector", "texto"),
     "esperar": ("condicion", "max_s", "espera_s"),
     "reporte": ("voz", "max_s", "espera_s"),  # Power BI insertado: espera a que se dibuje y narra encima
+    "app": (),  # portal del sandbox :5080: {titulo, limpiar?} lo abre y {cerrar: true} lo cierra
 }
+DENTRO_DE_APP = ("clic", "narrar", "esperar")
 MOTORES = ("agente", "solo-evidencia")
 VENTANA_S = (480, 720)
 LIMITE_S = 690
 CARACTERES_POR_S = 17  # ritmo medido de Dalia a 1×
-OVERHEAD = {"slide": 1.5, "narrar": 0.6, "clic": 1.2, "elegir": 1.0, "escribir": 0.0, "esperar": 0.0, "reporte": 1.0}
+OVERHEAD = {"slide": 1.5, "narrar": 0.6, "clic": 1.2, "elegir": 1.0, "escribir": 0.0, "esperar": 0.0, "reporte": 1.0, "app": 1.5}
 TECLEO_S = 0.06
 ESPERAS = ("esperar", "reporte")  # pasos con una espera real que «voz_mientras» puede cubrir
 
@@ -36,12 +38,22 @@ def validar(guion: dict) -> list[str]:
         nombre = escena.get("id") or f"escena {e_idx}"
         if not escena.get("id") or not escena.get("titulo"):
             errores.append(f"{nombre}: falta «id» o «titulo».")
+        en_app = False
         for p_idx, paso in enumerate(escena.get("pasos") or [], 1):
             donde = f"{nombre} · paso {p_idx}"
             tipo = paso.get("tipo")
             if tipo not in TIPOS:
                 errores.append(f"{donde}: tipo desconocido «{tipo}».")
                 continue
+            cierra = tipo == "app" and bool(paso.get("cerrar"))
+            if en_app and tipo not in DENTRO_DE_APP and not cierra:
+                errores.append(f"{donde}: dentro de «app» solo van clic, narrar y esperar.")
+            if cierra and not en_app:
+                errores.append(f"{donde}: «app» cierra sin haberse abierto.")
+            if tipo == "app" and not cierra and not paso.get("titulo"):
+                errores.append(f"{donde}: «app» necesita «titulo».")
+            if tipo == "app":
+                en_app = not cierra
             for campo in TIPOS[tipo]:
                 if paso.get(campo) in (None, "", []):
                     errores.append(f"{donde}: «{tipo}» necesita «{campo}».")
@@ -56,6 +68,8 @@ def validar(guion: dict) -> list[str]:
             espera = paso.get("espera_s")
             if tipo in ESPERAS and espera and not (isinstance(espera, list) and len(espera) == 2 and espera[0] <= espera[1]):
                 errores.append(f"{donde}: «espera_s» debe ser [min, max].")
+        if en_app:
+            errores.append(f"{nombre}: «app» sin cerrar.")
     return errores
 
 

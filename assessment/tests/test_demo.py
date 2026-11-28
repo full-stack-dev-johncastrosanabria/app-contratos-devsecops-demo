@@ -336,5 +336,45 @@ class ActionsPrevio(unittest.TestCase):
         self.assertEqual(errores({"tipo": "narrar", "voz": "Hola.", "focos": ["v1"]}), mal)
 
 
+
+class PasoApp(unittest.TestCase):
+    ABRIR, CERRAR = {"tipo": "app", "titulo": "Portal de Contratos · v1"}, {"tipo": "app", "cerrar": True}
+
+    def errores(self, pasos):
+        g = deepcopy(MINIMO)
+        g["escenas"][0]["pasos"] = pasos
+        return guion.validar(g)
+
+    def test_app_sin_cerrar_es_error(self):
+        dentro = [{"tipo": "clic", "selector": "#btn-simular"},
+                  {"tipo": "esperar", "condicion": "true", "max_s": 5, "espera_s": [0, 1]},
+                  {"tipo": "narrar", "voz": "Hola.", "foco": "#estado"}]
+        self.assertEqual(self.errores([self.ABRIR, *dentro, self.CERRAR]), [])
+        self.assertEqual(self.errores([self.ABRIR, *dentro]), ["a: «app» sin cerrar."])
+        self.assertEqual(self.errores([self.CERRAR]), ["a · paso 1: «app» cierra sin haberse abierto."])
+        self.assertEqual(self.errores([{"tipo": "app"}, self.CERRAR]), ["a · paso 1: «app» necesita «titulo»."])
+        self.assertEqual(guion.proyectar([self.ABRIR, self.CERRAR], {}, 1.0), 3.0)  # 1,5 s de acción cada uno
+
+    def test_dentro_de_app_solo_clic_narrar_esperar(self):
+        pasos = [self.ABRIR, {"tipo": "slide", "plantilla": "portada", "voz": "Hola."},
+                 {"tipo": "app", "titulo": "Portal de Contratos · v2"}, self.CERRAR]
+        self.assertEqual(self.errores(pasos), ["a · paso 2: dentro de «app» solo van clic, narrar y esperar.",
+                                               "a · paso 3: dentro de «app» solo van clic, narrar y esperar."])
+
+    def test_limpiar_detiene_el_sandbox_y_borra_sus_datos(self):
+        from demo import __main__ as runner
+        orden = []
+        with mock.patch.object(runner, "_consola", side_effect=lambda *a, **k: orden.append(("consola", *a)) or {}), \
+                mock.patch("assessment.demo_reset.clean_sandbox_data", side_effect=lambda repo: orden.append(("datos", repo)) or []), \
+                mock.patch.object(runner, "reiniciar_por_http", side_effect=lambda: orden.append(("reinicio",)) or {}), \
+                mock.patch.object(runner, "resumen_reinicio", return_value="ok"), \
+                mock.patch.object(runner.powerbi, "reponer", return_value=None), \
+                mock.patch.object(runner, "rutas_sucias", return_value=[]), \
+                mock.patch.object(runner, "puerto_libre", return_value=True), \
+                mock.patch.object(runner, "_ok"), mock.patch("builtins.print"):
+            runner.limpiar(None, True)
+        self.assertEqual(orden, [("consola", "POST", "/api/sandbox", {"accion": "detener"}), ("datos", runner.REPO), ("reinicio",)])
+
+
 if __name__ == "__main__":
     unittest.main()
