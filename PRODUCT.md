@@ -31,7 +31,7 @@ Dos agentes especializados sobre **Microsoft Agent Framework (MAF)** y **Azure A
 ## Capabilities and Constraints
 
 - **Política de seguridad HTTP estricta (CSP):** `assessment/ui.py` sirve recursos con `default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'`. No se permiten hojas de estilo inline, scripts inline ni carga de fuentes o iconos desde CDNs externos.
-- **Contratos HTTP y pruebas automatizadas:** deben preservarse intactos los endpoints locales (`GET /`, `GET /api/ecosistema`, `POST /api/evaluar`, `POST /api/acciones`, `POST /api/sandbox`, `GET /informes/<id>/<archivo>`) y el contrato verificado en `assessment/tests/test_ui.py` (incluyendo el texto `Evaluador de renovaciones` en `GET /`).
+- **Contratos HTTP y pruebas automatizadas:** deben preservarse intactos los endpoints locales (`GET /`, `GET /api/ecosistema`, `POST /api/evaluar`, `POST /api/acciones`, `POST /api/sandbox`, `GET /informes/<id>/<archivo>`) y el contrato verificado en `assessment/tests/test_ui.py` (incluyendo el texto `Evaluador de entregas` en `GET /`).
 - **Alcance confirmado:** remodelación focalizada exclusivamente en la Consola Evaluador principal (`:8050`); los portales sujetos de prueba (`v1`, `v2`, `v3` en `:5080`) se conservan sin cambios de diseño.
 - **Idioma:** español técnico claro y consistente en toda la interfaz, etiquetas, estados y mensajes de recuperación.
 

@@ -18,6 +18,7 @@ ARM_RESOURCE = "https://management.azure.com/"
 LOG_RESOURCE = "https://api.loganalytics.io/"
 POLICY_VERSION = "REN-001.v2"
 REPO_ROOT = Path(__file__).resolve().parent.parent
+WORKFLOW_CI = "devsecops.yml"
 
 
 def load_settings() -> dict[str, str]:
@@ -281,9 +282,14 @@ def fetch_github_context(settings: dict[str, str], commit_sha: str | None) -> di
                 "url": pr["html_url"],
             }
 
-        runs_data = _http_json("GET", f"{base}/actions/runs?per_page=10", headers)
-        runs = runs_data.get("workflow_runs", [])
-        ci_run = next((r for r in runs if commit_sha and r.get("head_sha") == commit_sha), runs[0] if runs else None)
+        # Solo el workflow del pipeline: la lista general mezcla Dependabot y otros workflows sobre el mismo commit.
+        runs_url = f"{base}/actions/workflows/{WORKFLOW_CI}/runs"
+        runs = []
+        if commit_sha:
+            runs = _http_json("GET", f"{runs_url}?head_sha={commit_sha}&per_page=1", headers).get("workflow_runs", [])
+        if not runs:
+            runs = _http_json("GET", f"{runs_url}?branch=main&per_page=1", headers).get("workflow_runs", [])
+        ci_run = runs[0] if runs else None
         if ci_run:
             artifacts_data = _http_json("GET", f"{base}/actions/runs/{ci_run['id']}/artifacts", headers)
             out["pipeline_ci"] = {
